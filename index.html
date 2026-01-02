@@ -9,13 +9,25 @@
   </head>
   <body>
     <div class="container">
-      <h1>🕵️ Deaddrop</h1>
+      <div class="header">
+        <h1>🕵️ Deaddrop</h1>
+        <div class="zoom-controls">
+          <button id="zoom-out">−</button>
+          <span id="zoom-level">100%</span>
+          <button id="zoom-in">+</button>
+        </div>
+      </div>
 
       <!-- Connection Form -->
       <div id="connection-panel" class="panel">
         <h2>Connect to Server</h2>
         <input type="text" id="host" placeholder="Host (e.g., 192.168.1.10)" />
-        <input type="number" id="port" placeholder="22" />
+        
+        <div class="input-with-toggle">
+          <input type="password" id="port" placeholder="22" value="22" />
+          <button type="button" id="toggle-port" class="eye-btn" tabindex="-1">👁️</button>
+        </div>
+        
         <input type="text" id="username" placeholder="Username" />
         <input type="password" id="password" placeholder="Password" />
         <button id="connect-btn">Connect</button>
@@ -28,12 +40,19 @@
           <button id="disconnect-btn">Disconnect</button>
           <span id="connected-to"></span>
         </div>
-        
+
         <div class="path-bar">
           <button id="up-btn">⬆️ Up</button>
           <input type="text" id="current-path" value="/" />
           <button id="go-btn">Go</button>
         </div>
+
+        <div class="actions-bar">
+          <button id="upload-btn">📤 Upload File</button>
+          <button id="refresh-btn">🔄 Refresh</button>
+        </div>
+
+        <input type="file" id="file-input" style="display: none;" />
 
         <div id="file-list"></div>
       </div>
