@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Deaddrop</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body>
+    <div class="container">
+      <h1>🕵️ Deaddrop</h1>
+
+      <!-- Connection Form -->
+      <div id="connection-panel" class="panel">
+        <h2>Connect to Server</h2>
+        <input type="text" id="host" placeholder="Host (e.g., 192.168.1.10)" />
+        <input type="number" id="port" placeholder="22" />
+        <input type="text" id="username" placeholder="Username" />
+        <input type="password" id="password" placeholder="Password" />
+        <button id="connect-btn">Connect</button>
+        <div id="status"></div>
+      </div>
+
+      <!-- File Browser (hidden until connected) -->
+      <div id="browser-panel" class="panel hidden">
+        <div class="browser-header">
+          <button id="disconnect-btn">Disconnect</button>
+          <span id="connected-to"></span>
+        </div>
+        
+        <div class="path-bar">
+          <button id="up-btn">⬆️ Up</button>
+          <input type="text" id="current-path" value="/" />
+          <button id="go-btn">Go</button>
+        </div>
+
+        <div id="file-list"></div>
+      </div>
+    </div>
+  </body>
+</html>

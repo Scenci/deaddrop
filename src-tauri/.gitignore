@@ -1,0 +1,78 @@
+# =====================
+# OS / Editor junk
+# =====================
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*.tmp
+*.log
+
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+.idea/
+*.iml
+
+# =====================
+# Rust / Cargo
+# =====================
+**/target/
+**/*.rs.bk
+Cargo.lock
+# Uncomment if this is a binary app and you want lockfile tracked:
+# !Cargo.lock
+
+# =====================
+# Tauri
+# =====================
+src-tauri/target/
+src-tauri/gen/
+
+# =====================
+# Node / Frontend
+# =====================
+node_modules/
+dist/
+build/
+out/
+.cache/
+.parcel-cache/
+.vite/
+.next/
+.nuxt/
+.svelte-kit/
+
+# npm / pnpm / yarn
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# =====================
+# Env / Secrets
+# =====================
+.env
+.env.*
+!.env.example
+
+# =====================
+# Testing / Coverage
+# =====================
+coverage/
+.nyc_output/
+
+# =====================
+# OS generated
+# =====================
+*.DS_Store
+*.AppleDouble
+*.LSOverride
+
+# =====================
+# Misc
+# =====================
+*.lock~
+*.bak
+*.old
