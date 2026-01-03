@@ -25,12 +25,12 @@
         
         <div class="input-with-toggle">
           <input type="password" id="port" placeholder="22" value="22" />
-          <button type="button" id="toggle-port" class="eye-btn" tabindex="-1">👁️</button>
+          <button type="button" id="toggle-port" class="eye-btn" tabindex="-1">Show</button>
         </div>
         
         <input type="text" id="username" placeholder="Username" />
         <input type="password" id="password" placeholder="Password" />
-        <button id="connect-btn">Connect</button>
+        <button id="connect-btn" class="primary">Connect</button>
         <div id="status"></div>
       </div>
 
@@ -42,17 +42,34 @@
         </div>
 
         <div class="path-bar">
-          <button id="up-btn">⬆️ Up</button>
+          <button id="up-btn">↑ Up</button>
           <input type="text" id="current-path" value="/" />
           <button id="go-btn">Go</button>
         </div>
 
         <div class="actions-bar">
-          <button id="upload-btn">📤 Upload File</button>
+          <button id="upload-btn" class="success">Upload Files</button>
           <button id="refresh-btn">🔄 Refresh</button>
         </div>
 
-        <input type="file" id="file-input" style="display: none;" />
+        <!-- Drag and Drop Zone -->
+        <div id="drop-zone" class="drop-zone">
+          <div class="drop-zone-content">
+            <p>Drag & drop files here</p>
+            <p class="drop-zone-hint">or use the Upload button above</p>
+          </div>
+        </div>
+
+        <!-- Upload Queue -->
+        <div id="upload-queue" class="upload-queue hidden">
+          <div class="queue-header">
+            <h3>Upload Queue</h3>
+            <span id="queue-status"></span>
+          </div>
+          <div id="queue-list"></div>
+        </div>
+
+        <input type="file" id="file-input" style="display: none;" multiple />
 
         <div id="file-list"></div>
       </div>
