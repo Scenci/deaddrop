@@ -56,8 +56,11 @@ fn connect(
     let mut session = Session::new().map_err(|e| e.to_string())?;
     session.set_tcp_stream(tcp);
     session.handshake().map_err(|e| format!("Handshake failed: {}", e))?;
+
+    session.set_keepalive(true, 60); // keep alive by sending a ping every 60s
+
     session.userauth_password(&username, &password)
-        .map_err(|e| format!("Authentication failed: {}", e))?;
+            .map_err(|e| format!("Authentication failed: {}", e))?;
 
     if session.authenticated() {
         let mut stored_session = state.session.lock().map_err(|e| e.to_string())?;
@@ -166,7 +169,7 @@ fn upload_file(
         .map_err(|e| format!("Failed to create remote file: {}", e))?;
 
     // Upload in chunks (64KB)
-    let chunk_size = 64 * 1024;
+    let chunk_size = 1024 * 1024;
     let mut buffer = vec![0u8; chunk_size];
     let mut bytes_sent: u64 = 0;
     let mut last_percent: u8 = 0;
