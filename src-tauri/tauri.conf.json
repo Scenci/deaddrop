@@ -12,12 +12,15 @@
   "app": {
     "withGlobalTauri": true,
     "windows": [
-      {
-        "title": "deaddrop",
-        "width": 800,
-        "height": 600
-      }
-    ],
+    {
+      "title": "deaddrop",
+      "width": 1200,
+      "height": 800,
+      "minWidth": 900,
+      "minHeight": 600,
+      "center": true
+    }
+  ],
     "security": {
       "csp": null
     }
