@@ -1,4 +1,5 @@
 use ssh2::{OpenFlags, Session};
+use std::fs;
 use std::io::Read;
 use std::io::Write;
 use std::net::TcpStream;
@@ -32,11 +33,44 @@ struct FileEntry {
     size: u64,
 }
 
+// ====================== LOCAL FILE SYSTEM COMMANDS =====================
+
+// Same as before - we grab all the directories
 #[tauri::command]
-fn ping() -> String {
-    "pong".into()
+fn get_home_dir() > Result<String, String> {
+    dirs::home_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .ok_or_else(|| "Could not find home directory".to_string())
 }
 
+// Now we need to grab them all 
+#[tauri::command]
+fn list_local_dir(path: String) -> Result<Vec<FileEntry>, String> {
+    let entries - fs::read_dir(&path).map_err(|e| format!("Failed to Read Directory {}", e))?;
+    let mut files: Vec<FileEntry> = Vec::new();
+
+    for entry in entries {
+        if let Ok(entry) = entry {
+            let metadata = entry.metadata();
+            let is_dir = metadata.as_ref().map(|m| m.is_dir()).unwrap_or(false);
+            let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
+
+            files.push(FileEntry {
+                name: entry.file_name().to_string_lossy().to_string(),
+                is_dir,
+                size,
+            });
+        }
+    }
+    Ok(files)
+}
+
+//TODO: figure out delete file and create directory
+//TODO: similar to below we need to figure out local file exists
+
+
+
+// ======================= REMOTE COMMANDS ===========================
 #[tauri::command]
 fn connect(
     host: String,
@@ -273,7 +307,6 @@ pub fn run() {
             session: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
-            ping,
             connect,
             list_dir,
             download_file,

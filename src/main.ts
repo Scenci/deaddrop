@@ -47,7 +47,7 @@ let fileListDiv: HTMLElement;
 let pathInput: HTMLInputElement;
 let connectedToSpan: HTMLElement;
 let dropZone: HTMLElement;
-let uploadQueueDiv: HTMLElement;
+//let uploadQueueDiv: HTMLElement;
 let queueListDiv: HTMLElement;
 let queueStatusSpan: HTMLElement;
 
@@ -59,7 +59,7 @@ window.addEventListener("DOMContentLoaded", () => {
   pathInput = document.querySelector("#current-path")!;
   connectedToSpan = document.querySelector("#connected-to")!;
   dropZone = document.querySelector("#drop-zone")!;
-  uploadQueueDiv = document.querySelector("#upload-queue")!;
+  //uploadQueueDiv = document.querySelector("#upload-queue")!;
   queueListDiv = document.querySelector("#queue-list")!;
   queueStatusSpan = document.querySelector("#queue-status")!;
 
@@ -311,8 +311,8 @@ async function queueFilesForUpload(filePaths: string[]) {
 }
 
 function renderQueue() {
-  const pending = uploadQueue.filter((f) => f.status === "pending").length;
-  const uploading = uploadQueue.filter((f) => f.status === "uploading").length;
+  //const pending = uploadQueue.filter((f) => f.status === "pending").length;
+  //const uploading = uploadQueue.filter((f) => f.status === "uploading").length;
   const complete = uploadQueue.filter((f) => f.status === "complete").length;
   const errors = uploadQueue.filter((f) => f.status === "error").length;
   const total = uploadQueue.length;
