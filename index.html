@@ -3,34 +3,34 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Deaddrop</title>
+    <title>deaddrop</title>
     <link rel="stylesheet" href="/src/styles.css" />
     <script type="module" src="/src/main.ts"></script>
   </head>
   <body>
     <div class="container">
       <div class="header">
-        <h1>🕵️ Deaddrop</h1>
+        <h1>deaddrop</h1>
         <div class="zoom-controls">
-          <button id="zoom-out">−</button>
+          <button id="zoom-out">➖</button>
           <span id="zoom-level">100%</span>
-          <button id="zoom-in">+</button>
+          <button id="zoom-in">➕</button>
         </div>
       </div>
 
       <!-- Connection Form -->
       <div id="connection-panel" class="panel">
-        <h2>Connect to Server</h2>
+        <h2> Connect to Server</h2>
         <input type="text" id="host" placeholder="Host (e.g., 192.168.1.10)" />
-        
+
         <div class="input-with-toggle">
           <input type="password" id="port" placeholder="22" value="22" />
           <button type="button" id="toggle-port" class="eye-btn" tabindex="-1">Show</button>
         </div>
-        
+
         <input type="text" id="username" placeholder="Username" />
         <input type="password" id="password" placeholder="Password" />
-        <button id="connect-btn" class="primary">Connect</button>
+        <button id="connect-btn" class="primary">🔗 Connect</button>
         <div id="status"></div>
       </div>
 
@@ -41,37 +41,48 @@
           <span id="connected-to"></span>
         </div>
 
-        <div class="path-bar">
-          <button id="up-btn">↑ Up</button>
-          <input type="text" id="current-path" value="/" />
-          <button id="go-btn">Go</button>
-        </div>
+        <div class="browser-layout">
+          <!-- Left: File Browser -->
+          <div class="browser-main">
+            <div class="path-bar">
+              <button id="up-btn">← Back</button>
+              <input type="text" id="current-path" value="/" />
+              <button id="go-btn">Go</button>
+            </div>
 
-        <div class="actions-bar">
-          <button id="upload-btn" class="success">Upload Files</button>
-          <button id="refresh-btn">🔄 Refresh</button>
-        </div>
+            <div class="actions-bar">
+              <button id="upload-btn" class="success">📤 Upload Files</button>
+              <button id="new-folder-btn">📁 New Folder</button>
+              <button id="refresh-btn">Refresh</button>
+            </div>
 
-        <!-- Drag and Drop Zone -->
-        <div id="drop-zone" class="drop-zone">
-          <div class="drop-zone-content">
-            <p>Drag & drop files here</p>
-            <p class="drop-zone-hint">or use the Upload button above</p>
+            <!-- Drop Zone -->
+            <div id="drop-zone" class="drop-zone">
+              <div class="drop-zone-content">
+                <p>📥 Drag and drop files here</p>
+                <p class="drop-zone-hint">or use the Upload button above</p>
+              </div>
+            </div>
+
+            <div id="file-list"></div>
+          </div>
+
+          <!-- Right: Upload Queue -->
+          <div class="queue-sidebar">
+            <div id="upload-queue" class="upload-queue">
+              <div class="queue-header">
+                <h3>Upload Queue</h3>
+                <div class="queue-header-actions">
+                  <span id="queue-status"></span>
+                  <button id="queue-clear-btn" class="small" title="Clear completed">Clear</button>
+                </div>
+              </div>
+              <div id="queue-list">
+                <div class="queue-empty">📭 No uploads in queue</div>
+              </div>
+            </div>
           </div>
         </div>
-
-        <!-- Upload Queue -->
-        <div id="upload-queue" class="upload-queue hidden">
-          <div class="queue-header">
-            <h3>Upload Queue</h3>
-            <span id="queue-status"></span>
-          </div>
-          <div id="queue-list"></div>
-        </div>
-
-        <input type="file" id="file-input" style="display: none;" multiple />
-
-        <div id="file-list"></div>
       </div>
     </div>
   </body>

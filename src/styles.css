@@ -27,13 +27,13 @@ body {
   line-height: 1.5;
   background: var(--bg-primary);
   color: var(--text-primary);
-  padding: calc(24px * var(--zoom));
+  padding: calc(20px * var(--zoom));
   min-height: 100vh;
 }
 
 /* ============ LAYOUT ============ */
 .container {
-  max-width: calc(640px * var(--zoom));
+  max-width: calc(95vw);
   margin: 0 auto;
 }
 
@@ -41,7 +41,7 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: calc(24px * var(--zoom));
+  margin-bottom: calc(20px * var(--zoom));
 }
 
 .header h1 {
@@ -124,10 +124,6 @@ input::placeholder {
   color: var(--text-secondary);
 }
 
-.input-group {
-  margin-bottom: calc(12px * var(--zoom));
-}
-
 .input-with-toggle {
   position: relative;
   margin-bottom: calc(12px * var(--zoom));
@@ -178,6 +174,11 @@ button:disabled {
   cursor: not-allowed;
 }
 
+button.small {
+  padding: calc(4px * var(--zoom)) calc(8px * var(--zoom));
+  font-size: calc(12px * var(--zoom));
+}
+
 button.primary {
   background: var(--accent);
   border-color: var(--accent);
@@ -212,11 +213,12 @@ button.danger:hover {
 }
 
 /* ============ CONNECTION PANEL ============ */
-#connection-panel input {
-  margin-bottom: calc(12px * var(--zoom));
+#connection-panel {
+  max-width: 400px;
+  margin: 0 auto;
 }
 
-#connection-panel .input-with-toggle {
+#connection-panel input {
   margin-bottom: calc(12px * var(--zoom));
 }
 
@@ -255,6 +257,12 @@ button.danger:hover {
 }
 
 /* ============ BROWSER PANEL ============ */
+#browser-panel {
+  height: calc(100vh - 100px);
+  display: flex;
+  flex-direction: column;
+}
+
 .browser-header {
   display: flex;
   align-items: center;
@@ -262,6 +270,13 @@ button.danger:hover {
   padding-bottom: calc(16px * var(--zoom));
   border-bottom: 1px solid var(--border-color);
   margin-bottom: calc(16px * var(--zoom));
+  flex-shrink: 0;
+}
+
+#disconnect-btn:hover {
+  background-color: var(--error);
+  border-color: var(--error);
+  color: #fff;
 }
 
 #connected-to {
@@ -269,10 +284,33 @@ button.danger:hover {
   color: var(--success);
 }
 
+/* Two-column layout */
+.browser-layout {
+  display: flex;
+  gap: calc(20px * var(--zoom));
+  flex: 1;
+  min-height: 0;
+}
+
+.browser-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.queue-sidebar {
+  width: calc(350px * var(--zoom));
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .path-bar {
   display: flex;
   gap: 8px;
   margin-bottom: calc(12px * var(--zoom));
+  flex-shrink: 0;
 }
 
 .path-bar input {
@@ -284,16 +322,18 @@ button.danger:hover {
   display: flex;
   gap: 8px;
   margin-bottom: calc(16px * var(--zoom));
+  flex-shrink: 0;
 }
 
 /* ============ DROP ZONE ============ */
 .drop-zone {
   border: 2px dashed var(--border-color);
   border-radius: 8px;
-  padding: calc(24px * var(--zoom));
+  padding: calc(16px * var(--zoom));
   text-align: center;
   margin-bottom: calc(16px * var(--zoom));
   transition: all 0.2s;
+  flex-shrink: 0;
 }
 
 .drop-zone.drag-over {
@@ -321,17 +361,21 @@ button.danger:hover {
   background: var(--bg-tertiary);
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  margin-bottom: calc(16px * var(--zoom));
   overflow: hidden;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .queue-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: calc(12px * var(--zoom)) calc(16px * var(--zoom));
+  padding: calc(12px * var(--zoom)) calc(14px * var(--zoom));
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
 }
 
 .queue-header h3 {
@@ -340,21 +384,32 @@ button.danger:hover {
   margin: 0;
 }
 
+.queue-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 #queue-status {
   font-size: calc(12px * var(--zoom));
   color: var(--text-secondary);
 }
 
 #queue-list {
-  max-height: calc(180px * var(--zoom));
+  flex: 1;
   overflow-y: auto;
+  min-height: 0;
+}
+
+.queue-empty {
+  padding: calc(24px * var(--zoom));
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: calc(13px * var(--zoom));
 }
 
 .queue-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: calc(10px * var(--zoom)) calc(16px * var(--zoom));
+  padding: calc(12px * var(--zoom)) calc(14px * var(--zoom));
   border-bottom: 1px solid var(--border-color);
 }
 
@@ -362,41 +417,51 @@ button.danger:hover {
   border-bottom: none;
 }
 
-.queue-item-info {
-  flex: 1;
-  min-width: 0;
+.queue-item-header {
   display: flex;
+  justify-content: space-between;
   align-items: center;
-  gap: 8px;
-}
-
-.queue-item-icon {
-  flex-shrink: 0;
-  font-size: calc(14px * var(--zoom));
+  margin-bottom: 6px;
 }
 
 .queue-item-name {
+  font-size: calc(13px * var(--zoom));
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: calc(13px * var(--zoom));
+  flex: 1;
+  margin-right: 10px;
+}
+
+.queue-item-status {
+  font-size: calc(11px * var(--zoom));
+  color: var(--text-secondary);
+}
+
+.queue-item.complete .queue-item-status {
+  color: var(--success);
+}
+
+.queue-item.error .queue-item-status {
+  color: var(--error);
 }
 
 .queue-item-error {
   font-size: calc(11px * var(--zoom));
   color: var(--error);
-  margin-left: auto;
+  margin-bottom: 6px;
+  word-break: break-word;
 }
 
 .queue-item-progress {
   display: flex;
   align-items: center;
   gap: 10px;
-  flex-shrink: 0;
+  margin-bottom: 6px;
 }
 
 .progress-bar {
-  width: 80px;
+  flex: 1;
   height: 4px;
   background: var(--bg-primary);
   border-radius: 2px;
@@ -426,15 +491,7 @@ button.danger:hover {
 }
 
 .queue-remove-btn {
-  padding: 4px 8px;
-  font-size: 12px;
-  background: transparent;
-  border: 1px solid var(--border-color);
-}
-
-.queue-remove-btn:hover {
-  border-color: var(--error);
-  color: var(--error);
+  margin-top: 4px;
 }
 
 /* ============ FILE LIST ============ */
@@ -442,7 +499,9 @@ button.danger:hover {
   background: var(--bg-tertiary);
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  overflow: hidden;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
 
 .file-item {
@@ -472,12 +531,30 @@ button.danger:hover {
   gap: 10px;
   flex: 1;
   min-width: 0;
-  font-size: calc(13px * var(--zoom));
 }
 
-.download-btn {
-  padding: calc(6px * var(--zoom)) calc(10px * var(--zoom));
+.file-icon {
+  font-size: calc(14px * var(--zoom));
+  flex-shrink: 0;
+}
+
+.file-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-size {
   font-size: calc(12px * var(--zoom));
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.file-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+  margin-left: 10px;
 }
 
 .loading,
@@ -512,7 +589,7 @@ button.danger:hover {
   background: var(--text-secondary);
 }
 
-/* ============ CONFIRM DIALOG ============ */
+/* ============ DIALOGS ============ */
 .confirm-overlay {
   position: fixed;
   top: 0;
@@ -541,7 +618,12 @@ button.danger:hover {
 
 .confirm-dialog p {
   color: var(--text-secondary);
-  margin-bottom: 20px;
+  margin-bottom: 16px;
+  white-space: pre-line;
+}
+
+.confirm-dialog .prompt-input {
+  margin-bottom: 16px;
 }
 
 .confirm-dialog .buttons {
@@ -549,14 +631,28 @@ button.danger:hover {
   gap: 10px;
   justify-content: flex-end;
 }
-/* File Actions */
-.file-actions {
-  display: flex;
-  gap: 8px;
-  flex-shrink: 0;
+
+/* ============ RESPONSIVE ============ */
+@media (max-width: 900px) {
+  .browser-layout {
+    flex-direction: column;
+  }
+
+  .queue-sidebar {
+    width: 100%;
+    max-height: 300px;
+  }
+  
+  #browser-panel {
+    height: auto;
+  }
+  
+  #file-list {
+    max-height: 400px;
+  }
 }
 
-.delete-btn {
-  padding: calc(6px * var(--zoom)) calc(10px * var(--zoom));
-  font-size: calc(12px * var(--zoom));
+.drop-zone:hover {
+  border-color: var(--accent);
+  background: rgba(88, 166, 255, 0.05);
 }

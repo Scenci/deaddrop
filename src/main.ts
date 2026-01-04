@@ -73,15 +73,15 @@ window.addEventListener("DOMContentLoaded", () => {
   const goBtn = document.querySelector<HTMLButtonElement>("#go-btn")!;
   const uploadBtn = document.querySelector<HTMLButtonElement>("#upload-btn")!;
   const refreshBtn = document.querySelector<HTMLButtonElement>("#refresh-btn")!;
+  const newFolderBtn = document.querySelector<HTMLButtonElement>("#new-folder-btn")!;
+  const queueClearBtn = document.querySelector<HTMLButtonElement>("#queue-clear-btn")!;
   const togglePortBtn = document.querySelector<HTMLButtonElement>("#toggle-port")!;
   const zoomInBtn = document.querySelector<HTMLButtonElement>("#zoom-in")!;
   const zoomOutBtn = document.querySelector<HTMLButtonElement>("#zoom-out")!;
   const zoomLevelSpan = document.querySelector<HTMLSpanElement>("#zoom-level")!;
 
-  // Listen for upload progress events from Rust
+  // Listen for events
   setupProgressListener();
-  
-  // Listen for drag-drop events from Tauri
   setupTauriDragDrop();
 
   // Zoom controls
@@ -134,7 +134,7 @@ window.addEventListener("DOMContentLoaded", () => {
     try {
       await invoke("connect", { host, port, username, password });
 
-      connectedToSpan.textContent = `Connected to ${host}`;
+      connectedToSpan.textContent = `✅ Connected to ${host}`;
       connectionPanel.classList.add("hidden");
       browserPanel.classList.remove("hidden");
 
@@ -156,10 +156,9 @@ window.addEventListener("DOMContentLoaded", () => {
     renderQueue();
   });
 
-  // Go button
+  // Navigation
   goBtn.addEventListener("click", () => loadDirectory(pathInput.value));
 
-  // Up button
   upBtn.addEventListener("click", () => {
     const parts = currentPath.split("/").filter(Boolean);
     parts.pop();
@@ -167,10 +166,15 @@ window.addEventListener("DOMContentLoaded", () => {
     loadDirectory(parentPath || "/");
   });
 
-  // Refresh button
   refreshBtn.addEventListener("click", () => loadDirectory(currentPath));
 
-  // Upload button (multiple files)
+  pathInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      loadDirectory(pathInput.value);
+    }
+  });
+
+  // Upload button
   uploadBtn.addEventListener("click", async () => {
     try {
       const selected = await open({
@@ -179,46 +183,61 @@ window.addEventListener("DOMContentLoaded", () => {
       });
 
       if (selected) {
-        // Ensure we always have an array
         const files = Array.isArray(selected) ? selected : [selected];
         if (files.length > 0) {
-          queueFilesForUpload(files);
+          await queueFilesForUpload(files);
         }
       }
     } catch (error) {
-      alert(`Error selecting files: ${error}`);
+      alert(`❌ Upload Failed: ${error}`);
     }
   });
 
-  // Path input enter key
-  pathInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      loadDirectory(pathInput.value);
+  // New folder button
+  newFolderBtn.addEventListener("click", async () => {
+    const folderName = await showPromptDialog("New Folder", "Enter folder name:");
+    if (folderName && folderName.trim()) {
+      const remotePath =
+        currentPath === "/"
+          ? `/${folderName.trim()}`
+          : `${currentPath}/${folderName.trim()}`;
+
+      try {
+        await invoke("create_directory", { remotePath });
+        await loadDirectory(currentPath);
+      } catch (error) {
+        alert(`❌ Failed to create folder: ${error}`);
+      }
     }
   });
 
-  // Visual drag feedback for drop zone
+  // Queue clear button
+  queueClearBtn.addEventListener("click", () => {
+    uploadQueue = uploadQueue.filter(
+      (f) => f.status === "pending" || f.status === "uploading"
+    );
+    renderQueue();
+  });
+
+  // Drop zone visuals
   setupDropZoneVisuals();
 });
 
 // ============ TAURI DRAG & DROP ============
 
 function setupTauriDragDrop() {
-  // Listen for files dropped from Windows Explorer / file manager
-  listen<DragDropEvent>("tauri://drag-drop", (event) => {
+  listen<DragDropEvent>("tauri://drag-drop", async (event) => {
     const paths = event.payload.paths;
-    
+
     if (paths && paths.length > 0) {
-      // Check if browser panel is visible (user is connected)
       if (!browserPanel.classList.contains("hidden")) {
-        queueFilesForUpload(paths);
+        await queueFilesForUpload(paths);
       } else {
-        alert("Please connect to a server first before uploading files.");
+        alert("⚠️ Please connect to a server first before uploading files.");
       }
     }
   });
 
-  // Visual feedback when dragging over the window
   listen("tauri://drag-enter", () => {
     if (!browserPanel.classList.contains("hidden")) {
       dropZone.classList.add("drag-over");
@@ -228,14 +247,9 @@ function setupTauriDragDrop() {
   listen("tauri://drag-leave", () => {
     dropZone.classList.remove("drag-over");
   });
-
-  listen("tauri://drag-over", () => {
-    // Keep the visual feedback while dragging over
-  });
 }
 
 function setupDropZoneVisuals() {
-  // These handle browser-level drag events for visual feedback
   ["dragenter", "dragover"].forEach((eventName) => {
     dropZone.addEventListener(eventName, (e) => {
       e.preventDefault();
@@ -255,11 +269,30 @@ function setupDropZoneVisuals() {
 
 // ============ UPLOAD QUEUE ============
 
-function queueFilesForUpload(filePaths: string[]) {
+async function queueFilesForUpload(filePaths: string[]) {
   for (const localPath of filePaths) {
     const fileName = localPath.split(/[/\\]/).pop() || "unknown";
     const remotePath =
       currentPath === "/" ? `/${fileName}` : `${currentPath}/${fileName}`;
+
+    // Check if file already exists
+    try {
+      const exists = await invoke<boolean>("file_exists", { remotePath });
+      if (exists) {
+        const overwrite = await showConfirmDialog(
+          "File Exists",
+          `"${fileName}" already exists in this location. Do you want to overwrite it?`,
+          true,
+          "Overwrite"
+        );
+        if (!overwrite) {
+          continue; // Skip this file
+        }
+      }
+    } catch (error) {
+      // If check fails, proceed anyway
+      console.error("Failed to check if file exists:", error);
+    }
 
     const queuedFile: QueuedFile = {
       id: crypto.randomUUID(),
@@ -278,60 +311,66 @@ function queueFilesForUpload(filePaths: string[]) {
 }
 
 function renderQueue() {
-  if (uploadQueue.length === 0) {
-    uploadQueueDiv.classList.add("hidden");
-    return;
-  }
-
-  uploadQueueDiv.classList.remove("hidden");
-
   const pending = uploadQueue.filter((f) => f.status === "pending").length;
   const uploading = uploadQueue.filter((f) => f.status === "uploading").length;
   const complete = uploadQueue.filter((f) => f.status === "complete").length;
   const errors = uploadQueue.filter((f) => f.status === "error").length;
+  const total = uploadQueue.length;
 
-  queueStatusSpan.textContent = `${complete}/${uploadQueue.length} complete${
-    errors > 0 ? `, ${errors} failed` : ""
-  }`;
+  if (total > 0) {
+    queueStatusSpan.textContent = `${complete}/${total}${errors > 0 ? ` (${errors} failed)` : ""}`;
+  } else {
+    queueStatusSpan.textContent = "";
+  }
+
+  if (uploadQueue.length === 0) {
+    queueListDiv.innerHTML = '<div class="queue-empty">📭 No uploads in queue</div>';
+    return;
+  }
 
   queueListDiv.innerHTML = uploadQueue
     .map((file) => {
       let statusIcon = "";
+      let statusText = "";
       let statusClass = "";
 
       switch (file.status) {
         case "pending":
           statusIcon = "⏳";
+          statusText = "Pending";
           statusClass = "pending";
           break;
         case "uploading":
           statusIcon = "📤";
+          statusText = "Uploading";
           statusClass = "uploading";
           break;
         case "complete":
           statusIcon = "✅";
+          statusText = "Complete";
           statusClass = "complete";
           break;
         case "error":
           statusIcon = "❌";
+          statusText = "Failed";
           statusClass = "error";
           break;
       }
 
       return `
         <div class="queue-item ${statusClass}" data-id="${file.id}">
-          <div class="queue-item-info">
-            <span class="queue-item-icon">${statusIcon}</span>
-            <span class="queue-item-name" title="${file.fileName}">${file.fileName}</span>
-            ${file.error ? `<span class="queue-item-error">${file.error}</span>` : ""}
+          <div class="queue-item-header">
+            <span class="queue-item-name" title="${file.fileName}">${statusIcon} ${file.fileName}</span>
+            <span class="queue-item-status">${statusText}</span>
           </div>
+          ${file.error ? `<div class="queue-item-error">⚠️ ${file.error}</div>` : ""}
           <div class="queue-item-progress">
             <div class="progress-bar">
               <div class="progress-fill" style="width: ${file.progress}%"></div>
             </div>
             <span class="progress-text">${file.progress}%</span>
           </div>
-          ${file.status === "pending" ? `<button class="queue-remove-btn" data-id="${file.id}">✕</button>` : ""}
+          ${file.status === "pending" ? `<button class="queue-remove-btn small" data-id="${file.id}">Remove</button>` : ""}
         </div>
       `;
     })
@@ -412,7 +451,8 @@ function setupProgressListener() {
 
 async function loadDirectory(path: string) {
   try {
-    fileListDiv.innerHTML = "<div class='loading'>Loading...</div>";
+    
+    fileListDiv.innerHTML = "<div class='loading'>⏳ Loading...</div>";
 
     const files = await invoke<FileEntry[]>("list_dir", { path });
 
@@ -426,7 +466,7 @@ async function loadDirectory(path: string) {
     });
 
     if (files.length === 0) {
-      fileListDiv.innerHTML = "<div class='empty'>Empty directory</div>";
+      fileListDiv.innerHTML = "<div class='empty'>📂 Empty directory</div>";
       return;
     }
 
@@ -436,12 +476,16 @@ async function loadDirectory(path: string) {
         const sizeText = file.is_dir ? "" : ` (${formatSize(file.size)})`;
         return `
           <div class="file-item ${file.is_dir ? "directory" : "file"}"
-               data-name="${file.name}"
-               data-is-dir="${file.is_dir}">
-            <span class="file-info">${icon} ${file.name}${sizeText}</span>
+              data-name="${file.name}"
+              data-is-dir="${file.is_dir}">
+            <span class="file-info">
+              <span class="file-icon">${icon}</span>
+              <span class="file-name">${file.name}</span>
+              <span class="file-size">${sizeText}</span>
+            </span>
             <div class="file-actions">
-              <button class="download-btn">${file.is_dir ? "Download" : "Download"}</button>
-              <button class="delete-btn danger">Delete</button>
+              <button class="download-btn small">Download</button>
+              <button class="delete-btn small danger">Delete</button>
             </div>
           </div>
         `;
@@ -454,31 +498,30 @@ async function loadDirectory(path: string) {
       const newPath =
         currentPath === "/" ? `/${name}` : `${currentPath}/${name}`;
 
-      // Click on directory row to navigate
       if (isDir) {
         item.addEventListener("click", (e) => {
           const target = e.target as HTMLElement;
-          if (!target.classList.contains("download-btn") && 
-              !target.classList.contains("delete-btn")) {
+          if (
+            !target.classList.contains("download-btn") &&
+            !target.classList.contains("delete-btn")
+          ) {
             loadDirectory(newPath);
           }
         });
       }
 
-      // Download button
       const downloadBtn = item.querySelector(".download-btn");
       if (downloadBtn) {
         downloadBtn.addEventListener("click", (e) => {
           e.stopPropagation();
           if (isDir) {
-            alert("Downloading entire directories is not yet supported.");
+            alert("⚠️ Downloading entire directories is not yet supported.");
           } else {
             downloadFile(newPath, name);
           }
         });
       }
 
-      // Delete button
       const deleteBtn = item.querySelector(".delete-btn");
       if (deleteBtn) {
         deleteBtn.addEventListener("click", (e) => {
@@ -488,7 +531,7 @@ async function loadDirectory(path: string) {
       }
     });
   } catch (error) {
-    fileListDiv.innerHTML = `<div class="error">Error: ${error}</div>`;
+    fileListDiv.innerHTML = `<div class="error">❌ Error: ${error}</div>`;
   }
 }
 
@@ -507,9 +550,9 @@ async function downloadFile(remotePath: string, fileName: string) {
       remotePath,
       localPath,
     });
-    alert(`Success! ${result}\nSaved to: ${localPath}`);
+    alert(`✅ Success! ${result}\nSaved to: ${localPath}`);
   } catch (error) {
-    alert(`Download failed: ${error}`);
+    alert(`❌ Download failed: ${error}`);
   }
 }
 
@@ -518,12 +561,13 @@ async function confirmDelete(remotePath: string, name: string, isDir: boolean) {
   const confirmed = await showConfirmDialog(
     `Delete ${typeText}?`,
     `Are you sure you want to delete "${name}"?${isDir ? "\n\nNote: Directory must be empty to delete." : ""}`,
-    true
+    true,
+    "Delete"
   );
 
   if (confirmed) {
     try {
-      const result = await invoke<string>("delete_file", { remotePath });
+      await invoke<string>("delete_file", { remotePath });
       await loadDirectory(currentPath);
     } catch (error) {
       alert(`Delete failed: ${error}`);
@@ -531,21 +575,24 @@ async function confirmDelete(remotePath: string, name: string, isDir: boolean) {
   }
 }
 
+// ============ DIALOGS ============
+
 function showConfirmDialog(
   title: string,
   message: string,
-  showConfirm: boolean = true
+  showConfirm: boolean = true,
+  confirmText: string = "Confirm"
 ): Promise<boolean> {
   return new Promise((resolve) => {
     const overlay = document.createElement("div");
     overlay.className = "confirm-overlay";
     overlay.innerHTML = `
       <div class="confirm-dialog">
-        <h3>${title}</h3>
+        <h3>⚠️ ${title}</h3>
         <p>${message}</p>
         <div class="buttons">
-          <button class="btn-cancel">Cancel</button>
-          ${showConfirm ? '<button class="btn-confirm danger">Delete</button>' : ""}
+          <button class="btn-cancel">❌ Cancel</button>
+          ${showConfirm ? `<button class="btn-confirm danger">✅ ${confirmText}</button>` : ""}
         </div>
       </div>
     `;
@@ -568,6 +615,56 @@ function showConfirmDialog(
       if (e.target === overlay) {
         document.body.removeChild(overlay);
         resolve(false);
+      }
+    });
+  });
+}
+
+function showPromptDialog(title: string, message: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "confirm-overlay";
+    overlay.innerHTML = `
+      <div class="confirm-dialog">
+        <h3>📁 ${title}</h3>
+        <p>${message}</p>
+        <input type="text" class="prompt-input" placeholder="Enter name..." />
+        <div class="buttons">
+          <button class="btn-cancel">❌ Cancel</button>
+          <button class="btn-confirm primary">✅ Create</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    const input = overlay.querySelector<HTMLInputElement>(".prompt-input")!;
+    input.focus();
+
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        document.body.removeChild(overlay);
+        resolve(input.value);
+      } else if (e.key === "Escape") {
+        document.body.removeChild(overlay);
+        resolve(null);
+      }
+    });
+
+    overlay.querySelector(".btn-cancel")!.addEventListener("click", () => {
+      document.body.removeChild(overlay);
+      resolve(null);
+    });
+
+    overlay.querySelector(".btn-confirm")!.addEventListener("click", () => {
+      document.body.removeChild(overlay);
+      resolve(input.value);
+    });
+
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) {
+        document.body.removeChild(overlay);
+        resolve(null);
       }
     });
   });
