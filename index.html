@@ -58,9 +58,11 @@
             <h3>📂 Local Machine</h3>
           </div>
           <div class="panel-toolbar">
+           
             <button id="local-back-btn">← Back</button>
             <input type="text" id="local-path" class="path-input" value="/" />
             <button id="local-go-btn">Go</button>
+             <input type="text" class="search-input" id="local-search" placeholder="Filter..." />
           </div>
           <div class="panel-actions">
             <button id="local-new-folder-btn">📁 New Folder</button>
@@ -88,9 +90,11 @@
             <span id="remote-server-name" class="server-name"></span>
           </div>
           <div class="panel-toolbar">
+           
             <button id="remote-back-btn">← Back</button>
             <input type="text" id="remote-path" class="path-input" value="/" />
             <button id="remote-go-btn">Go</button>
+            <input type="text" class="search-input" id="remote-search" placeholder="Filter..." />
           </div>
           <div class="panel-actions">
             <button id="remote-new-folder-btn">📁 New Folder</button>
@@ -98,7 +102,7 @@
           </div>
           <div id="remote-file-list" class="file-list">
             <div class="not-connected-message">
-              <p>🔌 Not connected</p>
+              <p>Not connected</p>
               <p class="hint">Click "Connect" to access remote files</p>
             </div>
           </div>
