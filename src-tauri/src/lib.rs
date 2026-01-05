@@ -9,12 +9,10 @@ use std::time::Duration;
 use tauri::{Emitter, State, Window};
 use serde::Serialize;
 
-// Session wrapper that can be sent between threads
 struct AppState {
     session: Mutex<Option<Session>>,
 }
 
-// Required for async commands with State
 unsafe impl Send for AppState {}
 unsafe impl Sync for AppState {}
 
@@ -33,20 +31,24 @@ struct FileEntry {
     size: u64,
 }
 
-// ====================== LOCAL FILE SYSTEM COMMANDS =====================
-
-// Same as before - we grab all the directories
 #[tauri::command]
-fn get_home_dir() > Result<String, String> {
+fn ping() -> String {
+    "pong".into()
+}
+
+// ============ LOCAL FILE SYSTEM COMMANDS ============
+
+#[tauri::command]
+fn get_home_dir() -> Result<String, String> {
     dirs::home_dir()
         .map(|p| p.to_string_lossy().to_string())
         .ok_or_else(|| "Could not find home directory".to_string())
 }
 
-// Now we need to grab them all 
 #[tauri::command]
 fn list_local_dir(path: String) -> Result<Vec<FileEntry>, String> {
-    let entries - fs::read_dir(&path).map_err(|e| format!("Failed to Read Directory {}", e))?;
+    let entries = fs::read_dir(&path).map_err(|e| format!("Failed to read directory: {}", e))?;
+
     let mut files: Vec<FileEntry> = Vec::new();
 
     for entry in entries {
@@ -62,15 +64,36 @@ fn list_local_dir(path: String) -> Result<Vec<FileEntry>, String> {
             });
         }
     }
+
     Ok(files)
 }
 
-//TODO: figure out delete file and create directory
-//TODO: similar to below we need to figure out local file exists
+#[tauri::command]
+fn create_local_directory(path: String) -> Result<String, String> {
+    fs::create_dir(&path).map_err(|e| format!("Failed to create directory: {}", e))?;
+    Ok("Directory created".into())
+}
 
+#[tauri::command]
+fn delete_local_file(path: String) -> Result<String, String> {
+    let metadata = fs::metadata(&path).map_err(|e| format!("Failed to stat: {}", e))?;
 
+    if metadata.is_dir() {
+        fs::remove_dir(&path).map_err(|e| format!("Failed to delete directory: {}", e))?;
+        Ok("Directory deleted".into())
+    } else {
+        fs::remove_file(&path).map_err(|e| format!("Failed to delete file: {}", e))?;
+        Ok("File deleted".into())
+    }
+}
 
-// ======================= REMOTE COMMANDS ===========================
+#[tauri::command]
+fn local_file_exists(path: String) -> Result<bool, String> {
+    Ok(Path::new(&path).exists())
+}
+
+// ============ REMOTE (SSH/SFTP) COMMANDS ============
+
 #[tauri::command]
 fn connect(
     host: String,
@@ -100,7 +123,6 @@ fn connect(
         .handshake()
         .map_err(|e| format!("Handshake failed: {}", e))?;
 
-    // Enable keepalive
     session.set_keepalive(true, 60);
 
     session
@@ -117,7 +139,20 @@ fn connect(
 }
 
 #[tauri::command]
-fn list_dir(path: String, state: State<'_, AppState>) -> Result<Vec<FileEntry>, String> {
+fn disconnect(state: State<'_, AppState>) -> Result<String, String> {
+    let mut stored_session = state.session.lock().map_err(|e| e.to_string())?;
+    *stored_session = None;
+    Ok("Disconnected".into())
+}
+
+#[tauri::command]
+fn is_connected(state: State<'_, AppState>) -> Result<bool, String> {
+    let session_guard = state.session.lock().map_err(|e| e.to_string())?;
+    Ok(session_guard.is_some())
+}
+
+#[tauri::command]
+fn list_remote_dir(path: String, state: State<'_, AppState>) -> Result<Vec<FileEntry>, String> {
     let session_guard = state.session.lock().map_err(|e| e.to_string())?;
     let session = session_guard.as_ref().ok_or("Not connected")?;
 
@@ -161,7 +196,7 @@ fn download_file(
         .read_to_end(&mut contents)
         .map_err(|e| e.to_string())?;
 
-    let mut local_file = std::fs::File::create(&local_path).map_err(|e| e.to_string())?;
+    let mut local_file = fs::File::create(&local_path).map_err(|e| e.to_string())?;
     local_file
         .write_all(&contents)
         .map_err(|e| e.to_string())?;
@@ -170,7 +205,7 @@ fn download_file(
 }
 
 #[tauri::command]
-fn delete_file(remote_path: String, state: State<'_, AppState>) -> Result<String, String> {
+fn delete_remote_file(remote_path: String, state: State<'_, AppState>) -> Result<String, String> {
     let session_guard = state.session.lock().map_err(|e| e.to_string())?;
     let session = session_guard.as_ref().ok_or("Not Connected")?;
     let sftp = session.sftp().map_err(|e| e.to_string())?;
@@ -192,6 +227,30 @@ fn delete_file(remote_path: String, state: State<'_, AppState>) -> Result<String
     }
 }
 
+#[tauri::command]
+fn remote_file_exists(remote_path: String, state: State<'_, AppState>) -> Result<bool, String> {
+    let session_guard = state.session.lock().map_err(|e| e.to_string())?;
+    let session = session_guard.as_ref().ok_or("Not Connected")?;
+    let sftp = session.sftp().map_err(|e| e.to_string())?;
+
+    match sftp.stat(Path::new(&remote_path)) {
+        Ok(_) => Ok(true),
+        Err(_) => Ok(false),
+    }
+}
+
+#[tauri::command]
+fn create_remote_directory(remote_path: String, state: State<'_, AppState>) -> Result<String, String> {
+    let session_guard = state.session.lock().map_err(|e| e.to_string())?;
+    let session = session_guard.as_ref().ok_or("Not Connected")?;
+    let sftp = session.sftp().map_err(|e| e.to_string())?;
+
+    sftp.mkdir(Path::new(&remote_path), 0o755)
+        .map_err(|e| format!("Failed to create directory: {}", e))?;
+
+    Ok("Directory created".into())
+}
+
 #[tauri::command(async)]
 async fn upload_file(
     remote_path: String,
@@ -199,32 +258,27 @@ async fn upload_file(
     state: State<'_, AppState>,
     window: Window,
 ) -> Result<String, String> {
-    // Get file info first (quick operation)
     let file_name = Path::new(&local_path)
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_default();
 
-    let metadata = std::fs::metadata(&local_path)
+    let metadata = fs::metadata(&local_path)
         .map_err(|e| format!("Failed to read local file: {}", e))?;
     let total_bytes = metadata.len();
 
-    // Clone what we need for the blocking task
     let local_path_clone = local_path.clone();
     let remote_path_clone = remote_path.clone();
     let file_name_clone = file_name.clone();
     let window_clone = window.clone();
 
-    // Acquire the session lock
     let session_guard = state.session.lock().map_err(|e| e.to_string())?;
     let session = session_guard.as_ref().ok_or("Not Connected")?;
     let sftp = session.sftp().map_err(|e| e.to_string())?;
 
-    // Open local file
-    let mut local_file = std::fs::File::open(&local_path_clone)
+    let mut local_file = fs::File::open(&local_path_clone)
         .map_err(|e| format!("Failed to open local file: {}", e))?;
 
-    // Create remote file
     let mut remote_file = sftp
         .open_mode(
             Path::new(&remote_path_clone),
@@ -234,7 +288,6 @@ async fn upload_file(
         )
         .map_err(|e| format!("Failed to create remote file: {}", e))?;
 
-    // Upload in chunks (1MB for speed)
     let chunk_size = 1024 * 1024;
     let mut buffer = vec![0u8; chunk_size];
     let mut bytes_sent: u64 = 0;
@@ -274,30 +327,6 @@ async fn upload_file(
     Ok(format!("Uploaded {} bytes", bytes_sent))
 }
 
-#[tauri::command]
-fn file_exists(remote_path: String, state: State<'_, AppState>) -> Result<bool, String> {
-    let session_guard = state.session.lock().map_err(|e| e.to_string())?;
-    let session = session_guard.as_ref().ok_or("Not Connected")?;
-    let sftp = session.sftp().map_err(|e| e.to_string())?;
-
-    match sftp.stat(Path::new(&remote_path)) {
-        Ok(_) => Ok(true),
-        Err(_) => Ok(false),
-    }
-}
-
-#[tauri::command]
-fn create_directory(remote_path: String, state: State<'_, AppState>) -> Result<String, String> {
-    let session_guard = state.session.lock().map_err(|e| e.to_string())?;
-    let session = session_guard.as_ref().ok_or("Not Connected")?;
-    let sftp = session.sftp().map_err(|e| e.to_string())?;
-
-    sftp.mkdir(Path::new(&remote_path), 0o755)
-        .map_err(|e| format!("Failed to create directory: {}", e))?;
-
-    Ok("Directory created".into())
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -307,13 +336,23 @@ pub fn run() {
             session: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
+            ping,
+            // Local
+            get_home_dir,
+            list_local_dir,
+            create_local_directory,
+            delete_local_file,
+            local_file_exists,
+            // Remote
             connect,
-            list_dir,
+            disconnect,
+            is_connected,
+            list_remote_dir,
             download_file,
             upload_file,
-            delete_file,
-            file_exists,
-            create_directory
+            delete_remote_file,
+            remote_file_exists,
+            create_remote_directory
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
