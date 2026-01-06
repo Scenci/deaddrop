@@ -36,6 +36,7 @@ let remotePath = "/";
 let isConnected = false;
 let connectedHost = "";
 let currentZoom = 1;
+let lastSelectedIndex: number = -1;
 
 // Selection
 let selectedLocalFiles: Set<string> = new Set();
@@ -417,7 +418,6 @@ async function createRemoteFolder() {
 }
 
 // ============ FILE LIST RENDERING ============
-
 function renderFileList(container: HTMLElement, files: FileEntry[], type: "local" | "remote") {
   container.innerHTML = files
     .map((file) => {
@@ -426,9 +426,11 @@ function renderFileList(container: HTMLElement, files: FileEntry[], type: "local
       const fullPath = type === "local"
         ? (localPath + (localPath.endsWith("/") || localPath.endsWith("\\") ? "" : (localPath.includes("\\") ? "\\" : "/")) + file.name)
         : (remotePath === "/" ? `/${file.name}` : `${remotePath}/${file.name}`);
-
+      const draggable = type === "local" && !file.is_dir ? 'draggable="true"' : '';
+      
       return `
         <div class="file-item" 
+             ${draggable}
              data-name="${file.name}" 
              data-path="${fullPath}"
              data-is-dir="${file.is_dir}" 
@@ -462,26 +464,78 @@ function renderFileList(container: HTMLElement, files: FileEntry[], type: "local
       }
     });
 
-    // Single click to select (local only)
+    // Single click to select (local files only)
     if (itemType === "local" && !isDir) {
-      item.addEventListener("click", (e) => {
+      item.addEventListener("click", (e: Event) => {
+        const mouseEvent = e as MouseEvent;
         if ((e.target as HTMLElement).classList.contains("delete-btn")) return;
 
-        if (selectedLocalFiles.has(path)) {
-          selectedLocalFiles.delete(path);
-          item.classList.remove("selected");
+        const allItems = Array.from(container.querySelectorAll(".file-item:not([data-is-dir='true'])"));
+        const currentIndex = allItems.indexOf(item);
+
+        if (mouseEvent.shiftKey && lastSelectedIndex !== -1) {
+          // Shift-click: select range
+          const start = Math.min(lastSelectedIndex, currentIndex);
+          const end = Math.max(lastSelectedIndex, currentIndex);
+
+          for (let i = start; i <= end; i++) {
+            const rangeItem = allItems[i] as HTMLElement;
+            const rangePath = rangeItem.getAttribute("data-path")!;
+            selectedLocalFiles.add(rangePath);
+            rangeItem.classList.add("selected");
+          }
+        } else if (mouseEvent.ctrlKey || mouseEvent.metaKey) {
+          // Ctrl-click: toggle single
+          if (selectedLocalFiles.has(path)) {
+            selectedLocalFiles.delete(path);
+            item.classList.remove("selected");
+          } else {
+            selectedLocalFiles.add(path);
+            item.classList.add("selected");
+          }
+          lastSelectedIndex = currentIndex;
         } else {
+          // Regular click: clear others, select this one
+          selectedLocalFiles.clear();
+          container.querySelectorAll(".file-item.selected").forEach((el) => {
+            el.classList.remove("selected");
+          });
           selectedLocalFiles.add(path);
           item.classList.add("selected");
+          lastSelectedIndex = currentIndex;
         }
         updateUploadButton();
+      });
+
+      // Drag start handler
+      item.addEventListener("dragstart", (e: Event) => {
+        const dragEvent = e as DragEvent;
+        let pathsToDrag: string[];
+        
+        if (selectedLocalFiles.has(path)) {
+          pathsToDrag = Array.from(selectedLocalFiles);
+        } else {
+          pathsToDrag = [path];
+        }
+        
+        if (dragEvent.dataTransfer) {
+          dragEvent.dataTransfer.setData("application/json", JSON.stringify(pathsToDrag));
+          dragEvent.dataTransfer.effectAllowed = "copy";
+        }
+        
+        dropZone.classList.add("drag-over");
+      });
+
+      // Drag end handler
+      item.addEventListener("dragend", () => {
+        dropZone.classList.remove("drag-over");
       });
     }
 
     // Delete button
     const deleteBtn = item.querySelector(".delete-btn");
     if (deleteBtn) {
-      deleteBtn.addEventListener("click", async (e) => {
+      deleteBtn.addEventListener("click", async (e: Event) => {
         e.stopPropagation();
         const typeText = isDir ? "directory" : "file";
         const confirmed = confirm(`Are you sure you want to delete "${name}"?${isDir ? "\n\nNote: Directory must be empty to delete." : ""}`);
@@ -736,18 +790,41 @@ function setupTauriDragDrop() {
 
 function setupDropZoneVisuals() {
   ["dragenter", "dragover"].forEach((eventName) => {
-    dropZone.addEventListener(eventName, (e) => {
+    dropZone.addEventListener(eventName, (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
       dropZone.classList.add("drag-over");
     });
   });
 
-  ["dragleave", "drop"].forEach((eventName) => {
-    dropZone.addEventListener(eventName, (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      dropZone.classList.remove("drag-over");
-    });
+  dropZone.addEventListener("dragleave", (e: Event) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dropZone.classList.remove("drag-over");
+  });
+
+  // Separate drop handler with async
+  dropZone.addEventListener("drop", async (e: DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dropZone.classList.remove("drag-over");
+
+    const jsonData = e.dataTransfer?.getData("application/json");
+    if (jsonData) {
+      try {
+        const paths = JSON.parse(jsonData) as string[];
+        if (paths.length > 0) {
+          await queueFilesForUpload(paths);
+          
+          selectedLocalFiles.clear();
+          document.querySelectorAll("#local-file-list .file-item.selected").forEach((el) => {
+            el.classList.remove("selected");
+          });
+          updateUploadButton();
+        }
+      } catch (err) {
+        console.error("Failed to parse drag data:", err);
+      }
+    }
   });
 }

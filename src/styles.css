@@ -735,3 +735,15 @@ button.danger:hover {
 .search-input:focus {
   border-color: var(--accent);
 }
+
+.file-item[draggable="true"] {
+  cursor: grab;
+}
+
+.file-item[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.file-item.dragging {
+  opacity: 0.5;
+}
