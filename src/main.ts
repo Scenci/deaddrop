@@ -23,6 +23,13 @@ interface QueuedFile {
   status: "pending" | "uploading" | "complete" | "error";
   progress: number;
   error?: string;
+  isDirectory?: boolean;
+}
+
+interface LocalFileInfo {
+  absolute_path: string;
+  relative_path: string;
+  is_dir: boolean;
 }
 
 interface DragDropEvent {
@@ -37,6 +44,13 @@ let isConnected = false;
 let connectedHost = "";
 let currentZoom = 1;
 let lastSelectedIndex: number = -1;
+
+// Custom drag state
+let isMouseDragging = false;
+let dragStartPos = { x: 0, y: 0 };
+const dragThreshold = 5;
+let dragGhost: HTMLElement | null = null;
+let draggedItems: string[] = [];
 
 // Selection
 let selectedLocalFiles: Set<string> = new Set();
@@ -108,34 +122,20 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // Search controls
   const localSearchInput = document.querySelector<HTMLInputElement>("#local-search")!;
-const remoteSearchInput = document.querySelector<HTMLInputElement>("#remote-search")!;
+  const remoteSearchInput = document.querySelector<HTMLInputElement>("#remote-search")!;
 
-localSearchInput.addEventListener("input", () => {
-  filterFileList(localFileList, localSearchInput.value);
-});
-
-remoteSearchInput.addEventListener("input", () => {
-  filterFileList(remoteFileList, remoteSearchInput.value);
-});
-
-function filterFileList(container: HTMLElement, query: string) {
-  const items = container.querySelectorAll(".file-item");
-  const lowerQuery = query.toLowerCase();
-  
-  items.forEach((item) => {
-    const name = item.getAttribute("data-name")?.toLowerCase() || "";
-    if (name.includes(lowerQuery)) {
-      (item as HTMLElement).style.display = "";
-    } else {
-      (item as HTMLElement).style.display = "none";
-    }
+  localSearchInput.addEventListener("input", () => {
+    filterFileList(localFileList, localSearchInput.value);
   });
-}
+
+  remoteSearchInput.addEventListener("input", () => {
+    filterFileList(remoteFileList, remoteSearchInput.value);
+  });
 
   // Initialize
   setupProgressListener();
   setupTauriDragDrop();
-  setupDropZoneVisuals();
+  setupCustomDrag();
 
   // Load local home directory
   try {
@@ -214,6 +214,7 @@ function filterFileList(container: HTMLElement, query: string) {
       connectedHost = host;
       connectionModal.classList.add("hidden");
       updateConnectionUI();
+      updateUploadButton();
       await loadRemoteDirectory("/");
     } catch (error) {
       connectStatus.textContent = `${error}`;
@@ -253,6 +254,22 @@ function filterFileList(container: HTMLElement, query: string) {
   });
 });
 
+// ============ HELPERS ============
+
+function filterFileList(container: HTMLElement, query: string) {
+  const items = container.querySelectorAll(".file-item");
+  const lowerQuery = query.toLowerCase();
+
+  items.forEach((item) => {
+    const name = item.getAttribute("data-name")?.toLowerCase() || "";
+    if (name.includes(lowerQuery)) {
+      (item as HTMLElement).style.display = "";
+    } else {
+      (item as HTMLElement).style.display = "none";
+    }
+  });
+}
+
 // ============ CONNECTION ============
 
 function updateConnectionUI() {
@@ -290,6 +307,7 @@ async function disconnectFromServer() {
   isConnected = false;
   connectedHost = "";
   updateConnectionUI();
+  updateUploadButton();
 }
 
 // ============ LOCAL FILE SYSTEM ============
@@ -323,21 +341,17 @@ async function loadLocalDirectory(path: string) {
 }
 
 function navigateLocalUp() {
-  // Handle Windows paths (C:\Users\...)
   if (localPath.match(/^[A-Z]:\\/i)) {
     const parts = localPath.split("\\").filter(Boolean);
     parts.pop();
-    
+
     if (parts.length === 0) {
-      // Already at root like C:\
       return;
     }
-    
-    // First part is "C:" - reconstruct properly
+
     const parentPath = parts[0] + "\\" + parts.slice(1).join("\\");
     loadLocalDirectory(parentPath || parts[0] + "\\");
   } else {
-    // Unix paths
     const parts = localPath.split("/").filter(Boolean);
     parts.pop();
     loadLocalDirectory("/" + parts.join("/") || "/");
@@ -404,9 +418,10 @@ async function createRemoteFolder() {
 
   const folderName = prompt("Enter folder name:");
   if (folderName && folderName.trim()) {
-    const newPath = remotePath === "/" 
-      ? `/${folderName.trim()}` 
-      : `${remotePath}/${folderName.trim()}`;
+    const newPath =
+      remotePath === "/"
+        ? `/${folderName.trim()}`
+        : `${remotePath}/${folderName.trim()}`;
 
     try {
       await invoke("create_remote_directory", { remotePath: newPath });
@@ -418,23 +433,35 @@ async function createRemoteFolder() {
 }
 
 // ============ FILE LIST RENDERING ============
-function renderFileList(container: HTMLElement, files: FileEntry[], type: "local" | "remote") {
+
+function renderFileList(
+  container: HTMLElement,
+  files: FileEntry[],
+  type: "local" | "remote"
+) {
   container.innerHTML = files
     .map((file) => {
       const icon = file.is_dir ? "📁" : "📄";
       const sizeText = file.is_dir ? "" : formatSize(file.size);
-      const fullPath = type === "local"
-        ? (localPath + (localPath.endsWith("/") || localPath.endsWith("\\") ? "" : (localPath.includes("\\") ? "\\" : "/")) + file.name)
-        : (remotePath === "/" ? `/${file.name}` : `${remotePath}/${file.name}`);
-      const draggable = type === "local" && !file.is_dir ? 'draggable="true"' : '';
-      
+      const fullPath =
+        type === "local"
+          ? localPath +
+            (localPath.endsWith("/") || localPath.endsWith("\\")
+              ? ""
+              : localPath.includes("\\")
+              ? "\\"
+              : "/") +
+            file.name
+          : remotePath === "/"
+          ? `/${file.name}`
+          : `${remotePath}/${file.name}`;
+
       return `
         <div class="file-item" 
-             ${draggable}
-             data-name="${file.name}" 
-             data-path="${fullPath}"
-             data-is-dir="${file.is_dir}" 
-             data-type="${type}">
+            data-name="${file.name}" 
+            data-path="${fullPath}"
+            data-is-dir="${file.is_dir}" 
+            data-type="${type}">
           <span class="file-icon">${icon}</span>
           <span class="file-name">${file.name}</span>
           <span class="file-size">${sizeText}</span>
@@ -464,17 +491,16 @@ function renderFileList(container: HTMLElement, files: FileEntry[], type: "local
       }
     });
 
-    // Single click to select (local files only)
-    if (itemType === "local" && !isDir) {
+    // Single click to select (local items only)
+    if (itemType === "local") {
       item.addEventListener("click", (e: Event) => {
         const mouseEvent = e as MouseEvent;
         if ((e.target as HTMLElement).classList.contains("delete-btn")) return;
 
-        const allItems = Array.from(container.querySelectorAll(".file-item:not([data-is-dir='true'])"));
+        const allItems = Array.from(container.querySelectorAll(".file-item"));
         const currentIndex = allItems.indexOf(item);
 
         if (mouseEvent.shiftKey && lastSelectedIndex !== -1) {
-          // Shift-click: select range
           const start = Math.min(lastSelectedIndex, currentIndex);
           const end = Math.max(lastSelectedIndex, currentIndex);
 
@@ -485,7 +511,6 @@ function renderFileList(container: HTMLElement, files: FileEntry[], type: "local
             rangeItem.classList.add("selected");
           }
         } else if (mouseEvent.ctrlKey || mouseEvent.metaKey) {
-          // Ctrl-click: toggle single
           if (selectedLocalFiles.has(path)) {
             selectedLocalFiles.delete(path);
             item.classList.remove("selected");
@@ -495,7 +520,6 @@ function renderFileList(container: HTMLElement, files: FileEntry[], type: "local
           }
           lastSelectedIndex = currentIndex;
         } else {
-          // Regular click: clear others, select this one
           selectedLocalFiles.clear();
           container.querySelectorAll(".file-item.selected").forEach((el) => {
             el.classList.remove("selected");
@@ -506,39 +530,18 @@ function renderFileList(container: HTMLElement, files: FileEntry[], type: "local
         }
         updateUploadButton();
       });
-
-      // Drag start handler
-      item.addEventListener("dragstart", (e: Event) => {
-        const dragEvent = e as DragEvent;
-        let pathsToDrag: string[];
-        
-        if (selectedLocalFiles.has(path)) {
-          pathsToDrag = Array.from(selectedLocalFiles);
-        } else {
-          pathsToDrag = [path];
-        }
-        
-        if (dragEvent.dataTransfer) {
-          dragEvent.dataTransfer.setData("application/json", JSON.stringify(pathsToDrag));
-          dragEvent.dataTransfer.effectAllowed = "copy";
-        }
-        
-        dropZone.classList.add("drag-over");
-      });
-
-      // Drag end handler
-      item.addEventListener("dragend", () => {
-        dropZone.classList.remove("drag-over");
-      });
     }
 
-    // Delete button
+    // Delete button (for both local and remote)
     const deleteBtn = item.querySelector(".delete-btn");
     if (deleteBtn) {
       deleteBtn.addEventListener("click", async (e: Event) => {
         e.stopPropagation();
-        const typeText = isDir ? "directory" : "file";
-        const confirmed = confirm(`Are you sure you want to delete "${name}"?${isDir ? "\n\nNote: Directory must be empty to delete." : ""}`);
+        const confirmed = confirm(
+          `Are you sure you want to delete "${name}"?${
+            isDir ? "\n\nNote: Directory must be empty to delete." : ""
+          }`
+        );
 
         if (confirmed) {
           try {
@@ -570,9 +573,8 @@ function formatSize(bytes: number): string {
 function updateUploadButton() {
   const count = selectedLocalFiles.size;
   uploadSelectedBtn.disabled = count === 0 || !isConnected;
-  uploadSelectedBtn.textContent = count > 0 
-    ? `📤 Upload Selected (${count})` 
-    : "📤 Upload Selected";
+  uploadSelectedBtn.textContent =
+    count > 0 ? `📤 Upload Selected (${count})` : "📤 Upload Selected";
 }
 
 async function uploadSelectedFiles() {
@@ -584,11 +586,12 @@ async function uploadSelectedFiles() {
   const files = Array.from(selectedLocalFiles);
   await queueFilesForUpload(files);
 
-  // Clear selection
   selectedLocalFiles.clear();
-  document.querySelectorAll("#local-file-list .file-item.selected").forEach((item) => {
-    item.classList.remove("selected");
-  });
+  document
+    .querySelectorAll("#local-file-list .file-item.selected")
+    .forEach((item) => {
+      item.classList.remove("selected");
+    });
   updateUploadButton();
 }
 
@@ -599,32 +602,100 @@ async function queueFilesForUpload(filePaths: string[]) {
   }
 
   for (const filePath of filePaths) {
-    const fileName = filePath.split(/[/\\]/).pop() || "unknown";
-    const remoteFilePath = remotePath === "/" 
-      ? `/${fileName}` 
-      : `${remotePath}/${fileName}`;
+    const isDir = await invoke<boolean>("is_directory", { path: filePath });
 
-    // Check if file exists
-    try {
-      const exists = await invoke<boolean>("remote_file_exists", { remotePath: remoteFilePath });
-      if (exists) {
-        const overwrite = confirm(`"${fileName}" already exists on the remote server. Overwrite?`);
-        if (!overwrite) continue;
+    if (isDir) {
+      try {
+        const allFiles = await invoke<LocalFileInfo[]>(
+          "list_local_dir_recursive",
+          { path: filePath }
+        );
+
+        allFiles.sort((a, b) => {
+          if (a.is_dir && !b.is_dir) return -1;
+          if (!a.is_dir && b.is_dir) return 1;
+          return a.relative_path.localeCompare(b.relative_path);
+        });
+
+        for (const file of allFiles) {
+          const relativePath = file.relative_path.replace(/\\/g, "/");
+          const remoteFilePath =
+            remotePath === "/"
+              ? `/${relativePath}`
+              : `${remotePath}/${relativePath}`;
+
+          if (file.is_dir) {
+            const queuedDir: QueuedFile = {
+              id: crypto.randomUUID(),
+              localPath: file.absolute_path,
+              fileName: `📁 ${relativePath}`,
+              remotePath: remoteFilePath,
+              status: "pending",
+              progress: 0,
+              isDirectory: true,
+            };
+            uploadQueue.push(queuedDir);
+          } else {
+            try {
+              const exists = await invoke<boolean>("remote_file_exists", {
+                remotePath: remoteFilePath,
+              });
+              if (exists) {
+                const overwrite = confirm(
+                  `"${relativePath}" already exists on the remote server. Overwrite?`
+                );
+                if (!overwrite) continue;
+              }
+            } catch (error) {
+              console.error("Failed to check if file exists:", error);
+            }
+
+            const queuedFile: QueuedFile = {
+              id: crypto.randomUUID(),
+              localPath: file.absolute_path,
+              fileName: relativePath,
+              remotePath: remoteFilePath,
+              status: "pending",
+              progress: 0,
+              isDirectory: false,
+            };
+            uploadQueue.push(queuedFile);
+          }
+        }
+      } catch (error) {
+        console.error("Failed to list directory:", error);
+        alert(`❌ Failed to read directory: ${error}`);
       }
-    } catch (error) {
-      console.error("Failed to check if file exists:", error);
+    } else {
+      const fileName = filePath.split(/[/\\]/).pop() || "unknown";
+      const remoteFilePath =
+        remotePath === "/" ? `/${fileName}` : `${remotePath}/${fileName}`;
+
+      try {
+        const exists = await invoke<boolean>("remote_file_exists", {
+          remotePath: remoteFilePath,
+        });
+        if (exists) {
+          const overwrite = confirm(
+            `"${fileName}" already exists on the remote server. Overwrite?`
+          );
+          if (!overwrite) continue;
+        }
+      } catch (error) {
+        console.error("Failed to check if file exists:", error);
+      }
+
+      const queuedFile: QueuedFile = {
+        id: crypto.randomUUID(),
+        localPath: filePath,
+        fileName,
+        remotePath: remoteFilePath,
+        status: "pending",
+        progress: 0,
+        isDirectory: false,
+      };
+      uploadQueue.push(queuedFile);
     }
-
-    const queuedFile: QueuedFile = {
-      id: crypto.randomUUID(),
-      localPath: filePath,
-      fileName,
-      remotePath: remoteFilePath,
-      status: "pending",
-      progress: 0,
-    };
-
-    uploadQueue.push(queuedFile);
   }
 
   renderQueue();
@@ -638,12 +709,14 @@ function renderQueue() {
   const errors = uploadQueue.filter((f) => f.status === "error").length;
   const total = uploadQueue.length;
 
-  queueStatusSpan.textContent = total > 0
-    ? `${complete}/${total}${errors > 0 ? ` (${errors} failed)` : ""}`
-    : "";
+  queueStatusSpan.textContent =
+    total > 0
+      ? `${complete}/${total}${errors > 0 ? ` (${errors} failed)` : ""}`
+      : "";
 
   if (uploadQueue.length === 0) {
-    queueListDiv.innerHTML = '<div class="queue-empty">📭 No uploads in queue</div>';
+    queueListDiv.innerHTML =
+      '<div class="queue-empty">📭 No uploads in queue</div>';
     return;
   }
 
@@ -728,7 +801,6 @@ async function processQueue() {
 
   isProcessingQueue = false;
 
-  // Refresh remote directory when all complete
   const allComplete = uploadQueue.every(
     (f) => f.status === "complete" || f.status === "error"
   );
@@ -739,12 +811,20 @@ async function processQueue() {
 
 async function uploadSingleFile(file: QueuedFile) {
   try {
-    await invoke<string>("upload_file", {
-      localPath: file.localPath,
-      remotePath: file.remotePath,
-    });
-    file.status = "complete";
-    file.progress = 100;
+    if (file.isDirectory) {
+      await invoke<string>("create_remote_directory", {
+        remotePath: file.remotePath,
+      });
+      file.status = "complete";
+      file.progress = 100;
+    } else {
+      await invoke<string>("upload_file", {
+        localPath: file.localPath,
+        remotePath: file.remotePath,
+      });
+      file.status = "complete";
+      file.progress = 100;
+    }
   } catch (error) {
     file.status = "error";
     file.error = String(error);
@@ -765,7 +845,7 @@ function setupProgressListener() {
   });
 }
 
-// ============ DRAG AND DROP ============
+// ============ TAURI DRAG AND DROP (External files from Windows) ============
 
 function setupTauriDragDrop() {
   listen<DragDropEvent>("tauri://drag-drop", async (event) => {
@@ -788,43 +868,166 @@ function setupTauriDragDrop() {
   });
 }
 
-function setupDropZoneVisuals() {
-  ["dragenter", "dragover"].forEach((eventName) => {
-    dropZone.addEventListener(eventName, (e: Event) => {
-      e.preventDefault();
-      e.stopPropagation();
-      dropZone.classList.add("drag-over");
-    });
+// ============ CUSTOM MOUSE DRAG SYSTEM (Internal drag within app) ============
+
+function setupCustomDrag() {
+  let mouseDownTarget: HTMLElement | null = null;
+  let mouseDownPath: string | null = null;
+  let hasDragStarted = false;
+
+  localFileList.addEventListener("mousedown", (e: MouseEvent) => {
+    const fileItem = (e.target as HTMLElement).closest(
+      ".file-item"
+    ) as HTMLElement;
+    if (!fileItem) return;
+    if ((e.target as HTMLElement).closest(".delete-btn")) return;
+    if (fileItem.dataset.type !== "local") return;
+
+    mouseDownTarget = fileItem;
+    mouseDownPath = fileItem.dataset.path || null;
+    dragStartPos = { x: e.clientX, y: e.clientY };
+    hasDragStarted = false;
   });
 
-  dropZone.addEventListener("dragleave", (e: Event) => {
-    e.preventDefault();
-    e.stopPropagation();
-    dropZone.classList.remove("drag-over");
-  });
+  document.addEventListener("mousemove", (e: MouseEvent) => {
+    if (!mouseDownTarget || !mouseDownPath) return;
 
-  // Separate drop handler with async
-  dropZone.addEventListener("drop", async (e: DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    dropZone.classList.remove("drag-over");
+    const dx = Math.abs(e.clientX - dragStartPos.x);
+    const dy = Math.abs(e.clientY - dragStartPos.y);
 
-    const jsonData = e.dataTransfer?.getData("application/json");
-    if (jsonData) {
-      try {
-        const paths = JSON.parse(jsonData) as string[];
-        if (paths.length > 0) {
-          await queueFilesForUpload(paths);
-          
-          selectedLocalFiles.clear();
-          document.querySelectorAll("#local-file-list .file-item.selected").forEach((el) => {
-            el.classList.remove("selected");
-          });
-          updateUploadButton();
-        }
-      } catch (err) {
-        console.error("Failed to parse drag data:", err);
-      }
+    if (!hasDragStarted && (dx > dragThreshold || dy > dragThreshold)) {
+      hasDragStarted = true;
+      startCustomDrag(e, mouseDownPath);
+    }
+
+    if (hasDragStarted) {
+      updateCustomDrag(e);
     }
   });
+
+  document.addEventListener("mouseup", (e: MouseEvent) => {
+    if (hasDragStarted) {
+      endCustomDrag(e);
+    }
+    mouseDownTarget = null;
+    mouseDownPath = null;
+    hasDragStarted = false;
+  });
+
+  document.addEventListener("mouseleave", () => {
+    if (hasDragStarted) {
+      cancelCustomDrag();
+    }
+    mouseDownTarget = null;
+    mouseDownPath = null;
+    hasDragStarted = false;
+  });
+}
+
+function startCustomDrag(e: MouseEvent, path: string) {
+  if (selectedLocalFiles.has(path)) {
+    draggedItems = Array.from(selectedLocalFiles);
+  } else {
+    draggedItems = [path];
+  }
+
+  isMouseDragging = true;
+
+  dragGhost = document.createElement("div");
+  dragGhost.className = "drag-ghost";
+
+  const count = draggedItems.length;
+  const fileName = draggedItems[0].split(/[/\\]/).pop() || "file";
+  dragGhost.innerHTML = count > 1 ? `📦 ${count} items` : `📄 ${fileName}`;
+
+  dragGhost.style.left = e.clientX + 10 + "px";
+  dragGhost.style.top = e.clientY + 10 + "px";
+  document.body.appendChild(dragGhost);
+
+  dropZone.classList.add("custom-drag-active");
+  remoteFileList.classList.add("custom-drag-active");
+
+  document.body.style.userSelect = "none";
+}
+
+function updateCustomDrag(e: MouseEvent) {
+  if (!dragGhost) return;
+
+  dragGhost.style.left = e.clientX + 10 + "px";
+  dragGhost.style.top = e.clientY + 10 + "px";
+
+  const elementsUnder = document.elementsFromPoint(e.clientX, e.clientY);
+
+  const overDropZone = elementsUnder.some(
+    (el) => el === dropZone || dropZone.contains(el)
+  );
+  const overRemoteList = elementsUnder.some(
+    (el) => el === remoteFileList || remoteFileList.contains(el)
+  );
+
+  dropZone.classList.toggle("custom-drag-hover", overDropZone);
+  remoteFileList.classList.toggle(
+    "custom-drag-hover",
+    overRemoteList && isConnected
+  );
+
+  if ((overDropZone || overRemoteList) && isConnected) {
+    dragGhost.classList.add("can-drop");
+  } else {
+    dragGhost.classList.remove("can-drop");
+  }
+}
+
+async function endCustomDrag(e: MouseEvent) {
+  if (!isMouseDragging || draggedItems.length === 0) {
+    cancelCustomDrag();
+    return;
+  }
+
+  const elementsUnder = document.elementsFromPoint(e.clientX, e.clientY);
+  const overDropZone = elementsUnder.some(
+    (el) => el === dropZone || dropZone.contains(el)
+  );
+  const overRemoteList = elementsUnder.some(
+    (el) => el === remoteFileList || remoteFileList.contains(el)
+  );
+
+  const validDrop = (overDropZone || overRemoteList) && isConnected;
+
+  cleanupCustomDrag();
+
+  if (validDrop) {
+    const items = [...draggedItems];
+    draggedItems = [];
+
+    await queueFilesForUpload(items);
+
+    selectedLocalFiles.clear();
+    document
+      .querySelectorAll("#local-file-list .file-item.selected")
+      .forEach((el) => {
+        el.classList.remove("selected");
+      });
+    updateUploadButton();
+  } else if (!isConnected && (overDropZone || overRemoteList)) {
+    alert("⚠️ Please connect to a server first");
+  }
+}
+
+function cancelCustomDrag() {
+  cleanupCustomDrag();
+  draggedItems = [];
+}
+
+function cleanupCustomDrag() {
+  isMouseDragging = false;
+
+  if (dragGhost) {
+    dragGhost.remove();
+    dragGhost = null;
+  }
+
+  dropZone.classList.remove("custom-drag-active", "custom-drag-hover");
+  remoteFileList.classList.remove("custom-drag-active", "custom-drag-hover");
+  document.body.style.userSelect = "";
 }

@@ -747,3 +747,140 @@ button.danger:hover {
 .file-item.dragging {
   opacity: 0.5;
 }
+.file-list.drop-target {
+  background: rgba(63, 185, 80, 0.1);
+  border: 2px dashed var(--success);
+  border-radius: 8px;
+}
+
+.file-list.drop-target .file-item {
+  pointer-events: none;
+}
+
+/* ============ CUSTOM DRAG SYSTEM ============ */
+.drag-ghost {
+  position: fixed;
+  pointer-events: none;
+  z-index: 9999;
+  background: var(--bg-secondary);
+  border: 2px solid var(--accent);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--text-primary);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  white-space: nowrap;
+}
+
+.drag-ghost.can-drop {
+  border-color: var(--success);
+  background: var(--bg-tertiary);
+}
+
+.custom-drag-active {
+  position: relative;
+}
+
+.custom-drag-active::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 2px dashed var(--border-color);
+  border-radius: 8px;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.drop-zone.custom-drag-hover,
+.file-list.custom-drag-hover {
+  background: rgba(63, 185, 80, 0.1) !important;
+}
+
+.drop-zone.custom-drag-hover::after,
+.file-list.custom-drag-hover::after {
+  border-color: var(--success) !important;
+}
+
+/* ============ CUSTOM DRAG SYSTEM ============ */
+
+.drag-ghost {
+  position: fixed;
+  pointer-events: none;
+  z-index: 9999;
+  background: var(--bg-secondary);
+  border: 2px solid var(--accent);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: calc(13px * var(--zoom));
+  color: var(--text-primary);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  white-space: nowrap;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.drag-ghost.can-drop {
+  border-color: var(--success);
+  background: var(--bg-tertiary);
+}
+
+/* Drop zone visual states */
+.drop-zone.custom-drag-active {
+  border-color: var(--accent);
+  background: rgba(88, 166, 255, 0.05);
+}
+
+.drop-zone.custom-drag-hover {
+  border-color: var(--success) !important;
+  background: rgba(63, 185, 80, 0.15) !important;
+}
+
+.drop-zone.custom-drag-hover .transfer-arrow {
+  color: var(--success);
+  transform: scale(1.2);
+  transition: transform 0.15s;
+}
+
+/* Remote file list as drop target */
+.file-list.custom-drag-active {
+  position: relative;
+}
+
+.file-list.custom-drag-active::before {
+  content: "Drop here to upload";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: calc(14px * var(--zoom));
+  color: var(--text-secondary);
+  pointer-events: none;
+  z-index: 10;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.file-list.custom-drag-hover::before {
+  opacity: 1;
+}
+
+.file-list.custom-drag-active::after {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border: 2px dashed var(--border-color);
+  border-radius: 6px;
+  pointer-events: none;
+  z-index: 5;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.file-list.custom-drag-hover::after {
+  border-color: var(--success);
+  background: rgba(63, 185, 80, 0.1);
+}
+
+/* Dim file items when dragging over */
+.file-list.custom-drag-hover .file-item {
+  opacity: 0.4;
+  pointer-events: none;
+}

@@ -327,6 +327,66 @@ async fn upload_file(
     Ok(format!("Uploaded {} bytes", bytes_sent))
 }
 
+#[derive(Serialize)]
+struct LocalFileInfo {
+    absolute_path: String,
+    relative_path: String,
+    is_dir: bool,
+}
+
+#[tauri::command]
+fn list_local_dir_recursive(path: String) -> Result<Vec<LocalFileInfo>, String> {
+    let base_path = Path::new(&path);
+    let mut results: Vec<LocalFileInfo> = Vec::new();
+    
+    fn walk_dir(dir: &Path, base: &Path, results: &mut Vec<LocalFileInfo>) -> Result<(), String> {
+        let entries = fs::read_dir(dir).map_err(|e| format!("Failed to read directory: {}", e))?;
+        
+        for entry in entries {
+            if let Ok(entry) = entry {
+                let path = entry.path();
+                let relative = path.strip_prefix(base)
+                    .map_err(|e| e.to_string())?
+                    .to_string_lossy()
+                    .to_string();
+                
+                let is_dir = path.is_dir();
+                
+                results.push(LocalFileInfo {
+                    absolute_path: path.to_string_lossy().to_string(),
+                    relative_path: relative,
+                    is_dir,
+                });
+                
+                if is_dir {
+                    walk_dir(&path, base, results)?;
+                }
+            }
+        }
+        Ok(())
+    }
+    
+    // Add the root directory itself
+    let dir_name = base_path.file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    
+    results.push(LocalFileInfo {
+        absolute_path: path.clone(),
+        relative_path: dir_name.clone(),
+        is_dir: true,
+    });
+    
+    walk_dir(base_path, base_path.parent().unwrap_or(base_path), &mut results)?;
+    
+    Ok(results)
+}
+
+#[tauri::command]
+fn is_directory(path: String) -> Result<bool, String> {
+    Ok(Path::new(&path).is_dir())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -340,9 +400,11 @@ pub fn run() {
             // Local
             get_home_dir,
             list_local_dir,
+            list_local_dir_recursive,
             create_local_directory,
             delete_local_file,
             local_file_exists,
+            is_directory,
             // Remote
             connect,
             disconnect,
