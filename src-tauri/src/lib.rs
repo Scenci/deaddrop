@@ -7,7 +7,8 @@ use std::path::Path;
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{Emitter, State, Window};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 struct AppState {
     session: Mutex<Option<Session>>,
@@ -19,6 +20,7 @@ unsafe impl Sync for AppState {}
 #[derive(Clone, Serialize)]
 struct UploadProgress {
     file_name: String,
+    local_path: String,  // ADD THIS
     bytes_sent: u64,
     total_bytes: u64,
     percent: u8,
@@ -310,12 +312,14 @@ async fn upload_file(
 
         let percent = ((bytes_sent as f64 / total_bytes as f64) * 100.0) as u8;
 
-        if percent != last_percent {
+        // Only emit every 2% to reduce overhead
+        if percent != last_percent && percent % 2 == 0 {
             last_percent = percent;
             let _ = window_clone.emit(
                 "upload-progress",
                 UploadProgress {
                     file_name: file_name_clone.clone(),
+                    local_path: local_path_clone.clone(),
                     bytes_sent,
                     total_bytes,
                     percent,
@@ -414,8 +418,109 @@ pub fn run() {
             upload_file,
             delete_remote_file,
             remote_file_exists,
-            create_remote_directory
+            create_remote_directory,
+            // Profiles
+            get_profiles,
+            save_profile,
+            delete_profile
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct ConnectionProfile {
+    name: String,
+    host: String,
+    port: u16,
+    username: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ProfilesData {
+    profiles: Vec<ConnectionProfile>,
+}
+
+fn get_profiles_path() -> Result<PathBuf, String> {
+    let app_data = dirs::config_dir()
+        .ok_or_else(|| "Could not find config directory".to_string())?;
+    
+    let deaddrop_dir = app_data.join("deaddrop");
+    
+    // Create directory if it doesn't exist
+    if !deaddrop_dir.exists() {
+        fs::create_dir_all(&deaddrop_dir)
+            .map_err(|e| format!("Failed to create config directory: {}", e))?;
+    }
+    
+    Ok(deaddrop_dir.join("profiles.json"))
+}
+
+#[tauri::command]
+fn get_profiles() -> Result<Vec<ConnectionProfile>, String> {
+    let path = get_profiles_path()?;
+    
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    
+    let contents = fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read profiles: {}", e))?;
+    
+    let data: ProfilesData = serde_json::from_str(&contents)
+        .map_err(|e| format!("Failed to parse profiles: {}", e))?;
+    
+    Ok(data.profiles)
+}
+
+#[tauri::command]
+fn save_profile(name: String, host: String, port: u16, username: String) -> Result<String, String> {
+    let path = get_profiles_path()?;
+    
+    let mut profiles = get_profiles().unwrap_or_default();
+    
+    // Check if profile with same name exists, update it
+    if let Some(existing) = profiles.iter_mut().find(|p| p.name == name) {
+        existing.host = host;
+        existing.port = port;
+        existing.username = username;
+    } else {
+        // Check max profiles limit
+        if profiles.len() >= 3 {
+            return Err("Maximum of 3 profiles allowed. Delete one first.".to_string());
+        }
+        
+        profiles.push(ConnectionProfile {
+            name,
+            host,
+            port,
+            username,
+        });
+    }
+    
+    let data = ProfilesData { profiles };
+    let json = serde_json::to_string_pretty(&data)
+        .map_err(|e| format!("Failed to serialize profiles: {}", e))?;
+    
+    fs::write(&path, json)
+        .map_err(|e| format!("Failed to write profiles: {}", e))?;
+    
+    Ok("Profile saved".to_string())
+}
+
+#[tauri::command]
+fn delete_profile(name: String) -> Result<String, String> {
+    let path = get_profiles_path()?;
+    
+    let mut profiles = get_profiles().unwrap_or_default();
+    profiles.retain(|p| p.name != name);
+    
+    let data = ProfilesData { profiles };
+    let json = serde_json::to_string_pretty(&data)
+        .map_err(|e| format!("Failed to serialize profiles: {}", e))?;
+    
+    fs::write(&path, json)
+        .map_err(|e| format!("Failed to write profiles: {}", e))?;
+    
+    Ok("Profile deleted".to_string())
 }
