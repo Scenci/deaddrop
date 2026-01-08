@@ -26,29 +26,74 @@
         </div>
       </div>
 
-      <!-- Connection Modal -->
-      <div id="connection-modal" class="modal hidden">
-        <div class="modal-content">
-          <div class="modal-header">
-            <h2>Connect to Server</h2>
-            <button class="modal-close" id="modal-close">✕</button>
-          </div>
-          <div class="modal-body">
-            <input type="text" id="host" placeholder="Host (e.g., 192.168.1.10)" />
-            <div class="input-with-toggle">
-              <input type="password" id="port" placeholder="22" value="22" />
-              <button type="button" id="toggle-port" class="eye-btn" tabindex="-1">👁️</button>
+     <!-- Connection Modal -->
+    <div id="connection-modal" class="modal hidden">
+      <div class="modal-content modal-connection">
+        <div class="modal-header">
+          <h2>Connect to Server</h2>
+          <button class="modal-close" id="modal-close">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="connection-form">
+            <div class="form-group">
+              <label for="host">Host</label>
+              <input type="text" id="host" placeholder="192.168.1.10 or hostname" />
             </div>
-            <input type="text" id="username" placeholder="Username" />
-            <input type="password" id="password" placeholder="Password" />
+            
+            <div class="form-row">
+              <div class="form-group form-group-small">
+                <label for="port">Port</label>
+                <input type="text" id="port" placeholder="22" value="22" />
+              </div>
+              <div class="form-group">
+                <label for="username">Username</label>
+                <input type="text" id="username" placeholder="root" />
+              </div>
+            </div>
+            
+            <div class="form-group">
+              <label for="password">Password</label>
+              <input type="password" id="password" placeholder="Enter password" />
+            </div>
+            
             <div id="connect-status"></div>
           </div>
-          <div class="modal-footer">
-            <button id="modal-cancel">Cancel</button>
-            <button id="modal-connect" class="primary">🔗 Connect</button>
+          
+          <div class="profiles-section">
+            <div class="profiles-header">
+              <span class="profiles-label">Saved Profiles</span>
+              <span class="profiles-count" id="profiles-count"></span>
+            </div>
+            <div class="profiles-list" id="profiles-list"></div>
+            
+            <div class="save-profile-row">
+              <input type="text" id="profile-name" placeholder="Profile name..." />
+              <button id="save-profile-btn">Save</button>
+            </div>
           </div>
         </div>
+        <div class="modal-footer">
+          <button id="modal-cancel">Cancel</button>
+          <button id="modal-connect" class="primary">Connect</button>
+        </div>
       </div>
+    </div>
+
+        <!-- Confirm Modal -->
+    <div id="confirm-modal" class="modal hidden">
+      <div class="modal-content modal-confirm">
+        <div class="modal-header">
+          <h2 id="confirm-title">Confirm</h2>
+        </div>
+        <div class="modal-body">
+          <p id="confirm-message"></p>
+        </div>
+        <div class="modal-footer">
+          <button id="confirm-cancel">Cancel</button>
+          <button id="confirm-ok" class="danger">Delete</button>
+        </div>
+      </div>
+    </div>
 
       <!-- Main Content -->
       <div class="main-layout">
@@ -123,5 +168,6 @@
         </div>
       </div>
     </div>
+    <div id="toast-container"></div>
   </body>
 </html>

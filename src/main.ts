@@ -1,6 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
 
 interface FileEntry {
   name: string;
@@ -10,6 +9,7 @@ interface FileEntry {
 
 interface UploadProgress {
   file_name: string;
+  local_path: string;  // ADD THIS
   bytes_sent: number;
   total_bytes: number;
   percent: number;
@@ -36,6 +36,12 @@ interface DragDropEvent {
   paths: string[];
   position: { x: number; y: number };
 }
+interface ConnectionProfile {
+  name: string;
+  host: string;
+  port: number;
+  username: string;
+}
 
 // State
 let localPath = "";
@@ -60,6 +66,11 @@ let uploadQueue: QueuedFile[] = [];
 let isProcessingQueue = false;
 const MAX_CONCURRENT_UPLOADS = 2;
 let activeUploads = 0;
+
+// Render throttling
+let renderQueued = false;
+let lastRenderTime = 0;
+const RENDER_THROTTLE_MS = 100;
 
 // DOM Elements
 let localFileList: HTMLElement;
@@ -94,7 +105,6 @@ window.addEventListener("DOMContentLoaded", async () => {
   const modalClose = document.querySelector<HTMLButtonElement>("#modal-close")!;
   const modalCancel = document.querySelector<HTMLButtonElement>("#modal-cancel")!;
   const modalConnect = document.querySelector<HTMLButtonElement>("#modal-connect")!;
-  const togglePortBtn = document.querySelector<HTMLButtonElement>("#toggle-port")!;
   const hostInput = document.querySelector<HTMLInputElement>("#host")!;
   const portInput = document.querySelector<HTMLInputElement>("#port")!;
   const usernameInput = document.querySelector<HTMLInputElement>("#username")!;
@@ -123,6 +133,11 @@ window.addEventListener("DOMContentLoaded", async () => {
   // Search controls
   const localSearchInput = document.querySelector<HTMLInputElement>("#local-search")!;
   const remoteSearchInput = document.querySelector<HTMLInputElement>("#remote-search")!;
+
+  // Get additional elements
+  const saveProfileBtn = document.querySelector<HTMLButtonElement>("#save-profile-btn")!;
+  const profileNameInput = document.querySelector<HTMLInputElement>("#profile-name")!;
+
 
   localSearchInput.addEventListener("input", () => {
     filterFileList(localFileList, localSearchInput.value);
@@ -158,28 +173,28 @@ window.addEventListener("DOMContentLoaded", async () => {
   zoomInBtn.addEventListener("click", () => updateZoom(0.1));
   zoomOutBtn.addEventListener("click", () => updateZoom(-0.1));
 
-  // Connection modal
+  // Connection modal - open
   connectBtn.addEventListener("click", () => {
     if (isConnected) {
       disconnectFromServer();
     } else {
       connectionModal.classList.remove("hidden");
+      connectStatus.textContent = "";  // Clear any previous error
+      connectStatus.className = "";    // Reset class
+      renderProfiles();
       hostInput.focus();
     }
+});
+
+  // Close modal handlers - clear state
+  modalClose.addEventListener("click", () => {
+    connectionModal.classList.add("hidden");
+    connectStatus.textContent = "";
   });
 
-  modalClose.addEventListener("click", () => connectionModal.classList.add("hidden"));
-  modalCancel.addEventListener("click", () => connectionModal.classList.add("hidden"));
-
-  // Port toggle
-  togglePortBtn.addEventListener("click", () => {
-    if (portInput.type === "password") {
-      portInput.type = "text";
-      togglePortBtn.textContent = "🙈";
-    } else {
-      portInput.type = "password";
-      togglePortBtn.textContent = "👁️";
-    }
+  modalCancel.addEventListener("click", () => {
+    connectionModal.classList.add("hidden");
+    connectStatus.textContent = "";
   });
 
   // Enter key to connect
@@ -190,39 +205,94 @@ window.addEventListener("DOMContentLoaded", async () => {
       }
     });
   });
+// Connect button
+modalConnect.addEventListener("click", async () => {
+  const host = hostInput.value.trim();
+  const port = parseInt(portInput.value) || 22;
+  const username = usernameInput.value.trim();
+  const password = passwordInput.value;
 
-  // Connect
-  modalConnect.addEventListener("click", async () => {
-    const host = hostInput.value;
+  // Clear previous error states
+  [hostInput, usernameInput, passwordInput].forEach(input => {
+  input.addEventListener("input", () => {
+    input.classList.remove("input-error");
+  });
+});
+
+  // Validate and highlight empty fields
+  let hasError = false;
+  if (!host) {
+    hostInput.classList.add("input-error");
+    hasError = true;
+  }
+  if (!username) {
+    usernameInput.classList.add("input-error");
+    hasError = true;
+  }
+  if (!password) {
+    passwordInput.classList.add("input-error");
+    hasError = true;
+  }
+
+  if (hasError) {
+    connectStatus.textContent = "Please fill in all required fields";
+    connectStatus.className = "error";
+    return;
+  }
+
+  connectStatus.textContent = "Connecting...";
+  connectStatus.className = "";
+  modalConnect.disabled = true;
+
+  try {
+    await invoke("connect", { host, port, username, password });
+    isConnected = true;
+    connectedHost = host;
+    connectionModal.classList.add("hidden");
+    
+    passwordInput.value = "";
+    connectStatus.textContent = "";
+    
+    updateConnectionUI();
+    updateUploadButton();
+    await loadRemoteDirectory("/");
+  } catch (error) {
+    connectStatus.textContent = `${error}`;
+    connectStatus.className = "error";
+  } finally {
+    modalConnect.disabled = false;
+  }
+});
+
+
+  // Save profile
+  saveProfileBtn.addEventListener("click", async () => {
+    const name = profileNameInput.value.trim();
+    const host = hostInput.value.trim();
     const port = parseInt(portInput.value) || 22;
-    const username = usernameInput.value;
-    const password = passwordInput.value;
+    const username = usernameInput.value.trim();
 
-    if (!host || !username || !password) {
-      connectStatus.textContent = "Please fill in all fields";
-      connectStatus.className = "error";
+    if (!name) {
+      alert("Please enter a profile name");
+      profileNameInput.focus();
       return;
     }
 
-    connectStatus.textContent = "Connecting...";
-    connectStatus.className = "";
-    modalConnect.disabled = true;
+    if (!host || !username) {
+      alert("Please fill in host and username first");
+      return;
+    }
 
     try {
-      await invoke("connect", { host, port, username, password });
-      isConnected = true;
-      connectedHost = host;
-      connectionModal.classList.add("hidden");
-      updateConnectionUI();
-      updateUploadButton();
-      await loadRemoteDirectory("/");
+      await invoke("save_profile", { name, host, port, username });
+      profileNameInput.value = "";
+      await renderProfiles();
+      showToast(`Profile "${name}" saved`, "success");
     } catch (error) {
-      connectStatus.textContent = `${error}`;
-      connectStatus.className = "error";
-    } finally {
-      modalConnect.disabled = false;
+      showToast(`${error}`, "error");
     }
   });
+
 
   // Local navigation
   localBackBtn.addEventListener("click", () => navigateLocalUp());
@@ -267,6 +337,39 @@ function filterFileList(container: HTMLElement, query: string) {
     } else {
       (item as HTMLElement).style.display = "none";
     }
+  });
+}
+
+function showConfirm(title: string, message: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const modal = document.getElementById("confirm-modal")!;
+    const titleEl = document.getElementById("confirm-title")!;
+    const messageEl = document.getElementById("confirm-message")!;
+    const okBtn = document.getElementById("confirm-ok")!;
+    const cancelBtn = document.getElementById("confirm-cancel")!;
+
+    titleEl.textContent = title;
+    messageEl.textContent = message;
+    modal.classList.remove("hidden");
+
+    const cleanup = () => {
+      modal.classList.add("hidden");
+      okBtn.removeEventListener("click", onOk);
+      cancelBtn.removeEventListener("click", onCancel);
+    };
+
+    const onOk = () => {
+      cleanup();
+      resolve(true);
+    };
+
+    const onCancel = () => {
+      cleanup();
+      resolve(false);
+    };
+
+    okBtn.addEventListener("click", onOk);
+    cancelBtn.addEventListener("click", onCancel);
   });
 }
 
@@ -494,8 +597,20 @@ function renderFileList(
     // Single click to select (local items only)
     if (itemType === "local") {
       item.addEventListener("click", (e: Event) => {
+      const target = e.target as HTMLElement;
+          
+          // Exit early if clicking delete button or any of its children
+          if (target.closest(".delete-btn")) {
+            console.log("Selection handler: Ignoring delete button click");
+            return;
+          }
+          if (target.closest(".file-actions")) {
+            console.log("Selection handler: Ignoring file-actions click");
+            return;
+          }
+
         const mouseEvent = e as MouseEvent;
-        if ((e.target as HTMLElement).classList.contains("delete-btn")) return;
+        if ((e.target as HTMLElement).closest(".delete-btn")) return;
 
         const allItems = Array.from(container.querySelectorAll(".file-item"));
         const currentIndex = allItems.indexOf(item);
@@ -536,13 +651,16 @@ function renderFileList(
     const deleteBtn = item.querySelector(".delete-btn");
     if (deleteBtn) {
       deleteBtn.addEventListener("click", async (e: Event) => {
+        e.preventDefault();
         e.stopPropagation();
-        const confirmed = confirm(
-          `Are you sure you want to delete "${name}"?${
-            isDir ? "\n\nNote: Directory must be empty to delete." : ""
-          }`
-        );
-
+        e.stopImmediatePropagation();
+        
+        const message = isDir 
+          ? `Are you sure you want to delete "${name}"?\n\nNote: Directory must be empty to delete.`
+          : `Are you sure you want to delete "${name}"?`;
+        
+        const confirmed = await showConfirm("Confirm Delete", message);
+        
         if (confirmed) {
           try {
             if (itemType === "local") {
@@ -553,7 +671,7 @@ function renderFileList(
               await loadRemoteDirectory(remotePath);
             }
           } catch (error) {
-            alert(`❌ Delete failed: ${error}`);
+            showToast(`Delete failed: ${error}`, "error");
           }
         }
       });
@@ -750,7 +868,7 @@ function renderQueue() {
       }
 
       return `
-        <div class="queue-item ${statusClass}">
+        <div class="queue-item ${statusClass}" data-id="${file.id}">
           <div class="queue-item-header">
             <span class="queue-item-name" title="${file.fileName}">${statusIcon} ${file.fileName}</span>
             <span class="queue-item-status">${statusText}</span>
@@ -836,11 +954,22 @@ function setupProgressListener() {
   listen<UploadProgress>("upload-progress", (event) => {
     const progress = event.payload;
     const file = uploadQueue.find(
-      (f) => f.fileName === progress.file_name && f.status === "uploading"
+      (f) => f.localPath === progress.local_path && f.status === "uploading"
     );
     if (file) {
       file.progress = progress.percent;
-      renderQueue();
+      
+      // Update just the progress bar, not the entire queue
+      const queueItem = queueListDiv.querySelector(`[data-id="${file.id}"]`);
+      if (queueItem) {
+        const progressFill = queueItem.querySelector(".progress-fill") as HTMLElement;
+        const progressText = queueItem.querySelector(".progress-text");
+        if (progressFill) progressFill.style.width = `${progress.percent}%`;
+        if (progressText) progressText.textContent = `${progress.percent}%`;
+      } else {
+        // Element not found, do a full render (throttled)
+        throttledRenderQueue();
+      }
     }
   });
 }
@@ -1031,3 +1160,123 @@ function cleanupCustomDrag() {
   remoteFileList.classList.remove("custom-drag-active", "custom-drag-hover");
   document.body.style.userSelect = "";
 }
+
+function throttledRenderQueue() {
+  const now = Date.now();
+  
+  if (now - lastRenderTime >= RENDER_THROTTLE_MS) {
+    // Enough time passed, render immediately
+    lastRenderTime = now;
+    renderQueue();
+  } else if (!renderQueued) {
+    // Schedule a render
+    renderQueued = true;
+    setTimeout(() => {
+      renderQueued = false;
+      lastRenderTime = Date.now();
+      renderQueue();
+    }, RENDER_THROTTLE_MS - (now - lastRenderTime));
+  }
+}
+// ============ PROFILES ============
+
+async function loadProfiles(): Promise<ConnectionProfile[]> {
+  try {
+    return await invoke<ConnectionProfile[]>("get_profiles");
+  } catch (error) {
+    console.error("Failed to load profiles:", error);
+    return [];
+  }
+}
+
+async function renderProfiles() {
+  const profilesList = document.querySelector("#profiles-list")!;
+  const profilesCount = document.querySelector("#profiles-count")!;
+  const profiles = await loadProfiles();
+
+  profilesCount.textContent = `${profiles.length}/3`;
+
+  if (profiles.length === 0) {
+    profilesList.innerHTML = `
+      <div class="profiles-empty">
+        No saved profiles yet
+      </div>
+    `;
+    return;
+  }
+
+  profilesList.innerHTML = profiles
+    .map(
+      (profile) => `
+      <div class="profile-item" data-name="${profile.name}" data-host="${profile.host}" data-port="${profile.port}" data-username="${profile.username}">
+        <div class="profile-item-info">
+          <div class="profile-item-name">${profile.name}</div>
+          <div class="profile-item-details">${profile.username}@${profile.host}:${profile.port}</div>
+        </div>
+        <button class="profile-item-delete small" data-name="${profile.name}">✕</button>
+      </div>
+    `
+    )
+    .join("");
+
+  // Add click handlers
+  profilesList.querySelectorAll(".profile-item").forEach((item) => {
+    const el = item as HTMLElement;
+    
+    // Click to select profile and fill form
+    item.addEventListener("click", (e) => {
+      if ((e.target as HTMLElement).classList.contains("profile-item-delete")) return;
+
+      const hostInput = document.querySelector<HTMLInputElement>("#host")!;
+      const portInput = document.querySelector<HTMLInputElement>("#port")!;
+      const usernameInput = document.querySelector<HTMLInputElement>("#username")!;
+      const passwordInput = document.querySelector<HTMLInputElement>("#password")!;
+      const profileNameInput = document.querySelector<HTMLInputElement>("#profile-name")!;
+
+      hostInput.value = el.dataset.host || "";
+      portInput.value = el.dataset.port || "22";
+      usernameInput.value = el.dataset.username || "";
+      profileNameInput.value = el.dataset.name || "";
+      passwordInput.value = "";
+      
+      // Highlight selected profile
+      profilesList.querySelectorAll(".profile-item").forEach((p) => p.classList.remove("selected"));
+      item.classList.add("selected");
+      
+      passwordInput.focus();
+    });
+    
+
+    // Delete Profile Button
+    const deleteBtn = item.querySelector(".profile-item-delete");
+    if (deleteBtn) {
+      deleteBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const name = (e.target as HTMLElement).getAttribute("data-name")!;
+        const confirmed = confirm(`Delete profile "${name}"?`);
+        if (confirmed) {
+          try {
+            await invoke("delete_profile", { name });
+            await renderProfiles();
+          } catch (error) {
+            alert(`Failed to delete profile: ${error}`);
+          }
+        }
+      });
+    }
+  });
+}
+function showToast(message: string, type: "success" | "error" = "success", duration = 3000) {
+  const container = document.getElementById("toast-container")!;
+  const toast = document.createElement("div");
+  toast.className = `toast ${type}`;
+  toast.textContent = message;
+  container.appendChild(toast);
+
+  setTimeout(() => {
+    toast.style.animation = "toast-out 0.2s ease-out forwards";
+    setTimeout(() => toast.remove(), 200);
+  }, duration);
+}
+
+
