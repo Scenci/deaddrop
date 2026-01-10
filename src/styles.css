@@ -1071,17 +1071,17 @@ button.danger:hover {
 
 /* ============ REMEMBER PASSWORD CHECKBOX ============ */
 .checkbox-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 8px;
+  margin-top: 0;                                /* stop double spacing */
+  margin-bottom: calc(14px * var(--zoom));      /* space before next section */
 }
 
 .checkbox-row input[type="checkbox"] {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
+  margin: 2px 0 0 0;       /* nudge checkbox down to align with text cap height */
   accent-color: var(--accent);
   cursor: pointer;
+  flex-shrink: 0;
 }
 
 .checkbox-row input[type="checkbox"]:disabled {
@@ -1090,14 +1090,21 @@ button.danger:hover {
 }
 
 .checkbox-row label {
-  font-size: calc(12px * var(--zoom));
+  display: inline;         /* undo grid */
+  line-height: 1.2;
+  font-size: calc(16px * var(--zoom));
   color: var(--text-secondary);
   cursor: pointer;
   user-select: none;
-  margin-bottom: 0;
+  font-weight: 600;
+  margin: 0;         /* ensure no inherited margin weirdness */
 }
 
 .checkbox-row label.disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+.profiles-section {
+  margin-top: 0; /* don't stack extra top margin */
 }
