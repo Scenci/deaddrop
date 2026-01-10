@@ -50,6 +50,7 @@ let isConnected = false;
 let connectedHost = "";
 let currentZoom = 1;
 let lastSelectedIndex: number = -1;
+let selectedSavedProfile: string | null = null;
 
 // Custom drag state
 let isMouseDragging = false;
@@ -85,6 +86,9 @@ let connectionStatusDiv: HTMLElement;
 let remoteServerName: HTMLElement;
 let uploadSelectedBtn: HTMLButtonElement;
 let dropZone: HTMLElement;
+let rememberCheckbox: HTMLInputElement;
+let rememberLabel: HTMLLabelElement;
+
 
 window.addEventListener("DOMContentLoaded", async () => {
   // Get DOM elements
@@ -137,9 +141,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   // Profile related buttons
   const saveProfileBtn = document.querySelector<HTMLButtonElement>("#save-profile-btn")!;
   const profileNameInput = document.querySelector<HTMLInputElement>("#profile-name")!;
-  const rememberCheckbox = document.querySelector<HTMLInputElement>("#remember-password")!;
-  const rememberLabel = document.querySelector<HTMLLabelElement>("label[for='remember-password']")!;
-
+  rememberCheckbox = document.querySelector<HTMLInputElement>("#remember-password")!;
+  rememberLabel = document.querySelector<HTMLLabelElement>("label[for='remember-password']")!;
 
   localSearchInput.addEventListener("input", () => {
     filterFileList(localFileList, localSearchInput.value);
@@ -326,6 +329,7 @@ modalConnect.addEventListener("click", async () => {
   });
 });
 
+
 // ============ HELPERS ============
 
 function filterFileList(container: HTMLElement, query: string) {
@@ -341,6 +345,7 @@ function filterFileList(container: HTMLElement, query: string) {
     }
   });
 }
+
 
 function showConfirm(title: string, message: string): Promise<boolean> {
   return new Promise((resolve) => {
@@ -374,6 +379,7 @@ function showConfirm(title: string, message: string): Promise<boolean> {
     cancelBtn.addEventListener("click", onCancel);
   });
 }
+
 
 // ============ CONNECTION ============
 
@@ -1163,6 +1169,7 @@ function cleanupCustomDrag() {
   document.body.style.userSelect = "";
 }
 
+
 function throttledRenderQueue() {
   const now = Date.now();
   
@@ -1190,6 +1197,7 @@ async function loadProfiles(): Promise<ConnectionProfile[]> {
     return [];
   }
 }
+
 
 async function renderProfiles() {
   const profilesList = document.querySelector("#profiles-list")!;
@@ -1244,6 +1252,9 @@ async function renderProfiles() {
       // Highlight selected profile
       profilesList.querySelectorAll(".profile-item").forEach((p) => p.classList.remove("selected"));
       item.classList.add("selected");
+
+      selectedSavedProfile = el.dataset.name || null;  // ADD THIS
+      updateRememberCheckbox();
       
       passwordInput.focus();
     });
@@ -1268,6 +1279,8 @@ async function renderProfiles() {
     }
   });
 }
+
+
 function showToast(message: string, type: "success" | "error" = "success", duration = 3000) {
   const container = document.getElementById("toast-container")!;
   const toast = document.createElement("div");
@@ -1280,5 +1293,17 @@ function showToast(message: string, type: "success" | "error" = "success", durat
     setTimeout(() => toast.remove(), 200);
   }, duration);
 }
+
+  function updateRememberCheckbox() {
+  const isEnabled = selectedSavedProfile !== null;
+  
+  rememberCheckbox.disabled = !isEnabled;
+  rememberLabel.classList.toggle("disabled", !isEnabled);
+  
+  // Update label text
+  rememberLabel.textContent = isEnabled 
+    ? "Remember password" 
+    : "Remember password (save profile first)";
+  }
 
 
