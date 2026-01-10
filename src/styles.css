@@ -1068,3 +1068,36 @@ button.danger:hover {
   margin: 0;
   line-height: 1.5;
 }
+
+/* ============ REMEMBER PASSWORD CHECKBOX ============ */
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.checkbox-row input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.checkbox-row input[type="checkbox"]:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.checkbox-row label {
+  font-size: calc(12px * var(--zoom));
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+  margin-bottom: 0;
+}
+
+.checkbox-row label.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

@@ -134,9 +134,11 @@ window.addEventListener("DOMContentLoaded", async () => {
   const localSearchInput = document.querySelector<HTMLInputElement>("#local-search")!;
   const remoteSearchInput = document.querySelector<HTMLInputElement>("#remote-search")!;
 
-  // Get additional elements
+  // Profile related buttons
   const saveProfileBtn = document.querySelector<HTMLButtonElement>("#save-profile-btn")!;
   const profileNameInput = document.querySelector<HTMLInputElement>("#profile-name")!;
+  const rememberCheckbox = document.querySelector<HTMLInputElement>("#remember-password")!;
+  const rememberLabel = document.querySelector<HTMLLabelElement>("label[for='remember-password']")!;
 
 
   localSearchInput.addEventListener("input", () => {

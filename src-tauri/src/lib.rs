@@ -9,6 +9,7 @@ use std::time::Duration;
 use tauri::{Emitter, State, Window};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use keyring::Entry;
 
 struct AppState {
     session: Mutex<Option<Session>>,
