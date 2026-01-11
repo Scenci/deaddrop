@@ -1,7 +1,7 @@
 name: Build Linux
 
 on:
-  workflow_dispatch:  # Manual trigger from GitHub UI
+  workflow_dispatch:
 
 jobs:
   build:
@@ -27,7 +27,7 @@ jobs:
           node-version: 20
       
       - name: Setup Rust
-        uses: dtolnay/rust-action@stable
+        uses: actions-rust-lang/setup-rust-toolchain@v1
       
       - name: Install npm dependencies
         run: npm install
