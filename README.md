@@ -1,1 +1,1 @@
-A lightweight SFTP client written in Rust by me {WIP}
+A lightweight SFTP client written in Rust
