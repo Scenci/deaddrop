@@ -210,6 +210,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       }
     });
   });
+
 // Connect button
 modalConnect.addEventListener("click", async () => {
   const host = hostInput.value.trim();
@@ -217,40 +218,26 @@ modalConnect.addEventListener("click", async () => {
   const username = usernameInput.value.trim();
   const password = passwordInput.value;
 
-  // Clear previous error states
-  [hostInput, usernameInput, passwordInput].forEach(input => {
-  input.addEventListener("input", () => {
-    input.classList.remove("input-error");
-  });
-});
-
-  // Validate and highlight empty fields
-  let hasError = false;
-  if (!host) {
-    hostInput.classList.add("input-error");
-    hasError = true;
-  }
-  if (!username) {
-    usernameInput.classList.add("input-error");
-    hasError = true;
-  }
-  if (!password) {
-    passwordInput.classList.add("input-error");
-    hasError = true;
-  }
-
-  if (hasError) {
-    connectStatus.textContent = "Please fill in all required fields";
-    connectStatus.className = "error";
-    return;
-  }
+  // ... validation code ...
 
   connectStatus.textContent = "Connecting...";
   connectStatus.className = "";
   modalConnect.disabled = true;
 
   try {
-    await invoke("connect", { host, port, username, password });
+    // Get the checkbox and profile name values
+    const profileName = selectedSavedProfile;  // Will be null if no profile selected
+    const rememberPwd = rememberCheckbox.checked;
+
+    await invoke("connect", { 
+      host, 
+      port, 
+      username, 
+      password,
+      profileName: profileName,
+      rememberPassword: rememberPwd 
+    });
+    
     isConnected = true;
     connectedHost = host;
     connectionModal.classList.add("hidden");
@@ -1232,28 +1219,47 @@ async function renderProfiles() {
   // Add click handlers
   profilesList.querySelectorAll(".profile-item").forEach((item) => {
     const el = item as HTMLElement;
-    
-    // Click to select profile and fill form
-    item.addEventListener("click", (e) => {
-      if ((e.target as HTMLElement).classList.contains("profile-item-delete")) return;
 
+    // Click to select profile and fill form
+    item.addEventListener("click", async (e) => {  // ADD async
+      if ((e.target as HTMLElement).classList.contains("profile-item-delete")) return;
+      
       const hostInput = document.querySelector<HTMLInputElement>("#host")!;
       const portInput = document.querySelector<HTMLInputElement>("#port")!;
       const usernameInput = document.querySelector<HTMLInputElement>("#username")!;
       const passwordInput = document.querySelector<HTMLInputElement>("#password")!;
       const profileNameInput = document.querySelector<HTMLInputElement>("#profile-name")!;
-
+      
       hostInput.value = el.dataset.host || "";
       portInput.value = el.dataset.port || "22";
       usernameInput.value = el.dataset.username || "";
       profileNameInput.value = el.dataset.name || "";
-      passwordInput.value = "";
+      
+      // Try to get saved password from keyring
+      const profileName = el.dataset.name || "";
+      if (profileName) {
+        try {
+          const savedPassword = await invoke<string | null>("get_profile_password", { 
+            profileName: profileName 
+          });
+          
+          if (savedPassword) {
+            passwordInput.value = savedPassword;
+          } else {
+            passwordInput.value = "";
+          }
+        } catch (error) {
+          console.error("Failed to get saved password:", error);
+          passwordInput.value = "";
+        }
+      } else {
+        passwordInput.value = "";
+      }
       
       // Highlight selected profile
       profilesList.querySelectorAll(".profile-item").forEach((p) => p.classList.remove("selected"));
       item.classList.add("selected");
-
-      selectedSavedProfile = el.dataset.name || null;  // ADD THIS
+      selectedSavedProfile = el.dataset.name || null;
       updateRememberCheckbox();
       
       passwordInput.focus();
@@ -1295,15 +1301,15 @@ function showToast(message: string, type: "success" | "error" = "success", durat
 }
 
   function updateRememberCheckbox() {
-  const isEnabled = selectedSavedProfile !== null;
+    const isEnabled = selectedSavedProfile !== null;
   
-  rememberCheckbox.disabled = !isEnabled;
-  rememberLabel.classList.toggle("disabled", !isEnabled);
-  
-  // Update label text
-  rememberLabel.textContent = isEnabled 
-    ? "Remember password" 
-    : "Remember password (save profile first)";
+    rememberCheckbox.disabled = !isEnabled;
+    rememberLabel.classList.toggle("disabled", !isEnabled);
+    
+    // Update label text
+    rememberLabel.textContent = isEnabled 
+      ? "Remember password" 
+      : "Remember password (save profile first)";
   }
 
 

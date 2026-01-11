@@ -104,6 +104,8 @@ fn connect(
     username: String,
     password: String,
     state: State<'_, AppState>,
+    profile_name: Option<String>,
+    remember_password: bool,
 ) -> Result<String, String> {
     let address = format!("{}:{}", host, port);
 
@@ -132,9 +134,17 @@ fn connect(
         .userauth_password(&username, &password)
         .map_err(|e| format!("Authentication failed: {}", e))?;
 
+    //Check if Authentication was successful
     if session.authenticated() {
         let mut stored_session = state.session.lock().map_err(|e| e.to_string())?;
         *stored_session = Some(session);
+
+        if remember_password {
+            if let Some(name) = profile_name {
+                let entry = Entry::new("deaddrop", &name).map_err(|e| format!("Keyring error: {}", e))?;
+                entry.set_password(&password).map_err(|e| format!("Failed to save password: {}", e))?;
+            }
+        }
         Ok("Authentication Successful".into())
     } else {
         Err("Authentication failed: Invalid credentials".into())
@@ -423,7 +433,8 @@ pub fn run() {
             // Profiles
             get_profiles,
             save_profile,
-            delete_profile
+            delete_profile,
+            get_profile_password
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -524,4 +535,14 @@ fn delete_profile(name: String) -> Result<String, String> {
         .map_err(|e| format!("Failed to write profiles: {}", e))?;
     
     Ok("Profile deleted".to_string())
+}
+
+#[tauri::command]
+fn get_profile_password(profile_name: String) -> Result <Option<String>, String> {
+    let entry = Entry::new("deaddrop", &profile_name).map_err(|e| format!("Keyring error: {}", e))?;
+    
+    match entry.get_password() {
+        Ok(password) => Ok(Some(password)),
+        Err(_) => Ok(None),
+    }
 }
