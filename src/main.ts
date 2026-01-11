@@ -9,7 +9,7 @@ interface FileEntry {
 
 interface UploadProgress {
   file_name: string;
-  local_path: string;  // ADD THIS
+  local_path: string;
   bytes_sent: number;
   total_bytes: number;
   percent: number;

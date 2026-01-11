@@ -21,7 +21,7 @@ unsafe impl Sync for AppState {}
 #[derive(Clone, Serialize)]
 struct UploadProgress {
     file_name: String,
-    local_path: String,  // ADD THIS
+    local_path: String,
     bytes_sent: u64,
     total_bytes: u64,
     percent: u8,
@@ -541,6 +541,7 @@ fn delete_profile(name: String) -> Result<String, String> {
 fn get_profile_password(profile_name: String) -> Result <Option<String>, String> {
     let entry = Entry::new("deaddrop", &profile_name).map_err(|e| format!("Keyring error: {}", e))?;
     
+    //don't ask me how this code works, the ai told me rust people like this because they are l33t
     match entry.get_password() {
         Ok(password) => Ok(Some(password)),
         Err(_) => Ok(None),
