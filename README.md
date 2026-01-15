@@ -1,1 +1,1 @@
-A lightweight SFTP client written in Rust
+A lightweight SFTP client written in Rust and Typescript (Tauri)
