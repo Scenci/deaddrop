@@ -22,7 +22,10 @@ jobs:
       - name: Install npm dependencies
         run: npm install
 
-      - name: Generate macOS icon
+      - name: Generate icons from SVG
+        run: node scripts/generate-icons.mjs
+
+      - name: Generate macOS ICNS
         run: |
           mkdir -p src-tauri/icons/icon.iconset
           sips -z 16 16 src-tauri/icons/icon.png --out src-tauri/icons/icon.iconset/icon_16x16.png

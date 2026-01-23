@@ -25,6 +25,23 @@ jobs:
       - name: Install npm dependencies
         run: npm install
 
+      - name: Generate icons from SVG
+        run: node scripts/generate-icons.mjs
+
+      - name: Generate Windows ICO
+        run: |
+          node -e "
+          import('png-to-ico').then(pngToIco => {
+            const fs = require('fs');
+            pngToIco.default('./src-tauri/icons/icon.png')
+              .then(buf => {
+                fs.writeFileSync('./src-tauri/icons/icon.ico', buf);
+                console.log('Generated: icon.ico');
+              })
+              .catch(console.error);
+          }).catch(console.error);
+          "
+
       - name: Build Tauri app
         run: npm run tauri build
 
@@ -68,6 +85,9 @@ jobs:
       - name: Install npm dependencies
         run: npm install
 
+      - name: Generate icons from SVG
+        run: node scripts/generate-icons.mjs
+
       - name: Build Tauri app
         run: npm run tauri build
 
@@ -101,7 +121,10 @@ jobs:
       - name: Install npm dependencies
         run: npm install
 
-      - name: Generate macOS icon
+      - name: Generate icons from SVG
+        run: node scripts/generate-icons.mjs
+
+      - name: Generate macOS ICNS
         run: |
           mkdir -p src-tauri/icons/icon.iconset
           sips -z 16 16 src-tauri/icons/icon.png --out src-tauri/icons/icon.iconset/icon_16x16.png

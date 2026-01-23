@@ -6,11 +6,11 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Install Linux dependencies
         run: |
           sudo apt-get update
@@ -20,27 +20,30 @@ jobs:
             librsvg2-dev \
             libwebkit2gtk-4.1-dev \
             libssl-dev
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-      
+
       - name: Setup Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
-      
+
       - name: Install npm dependencies
         run: npm install
-      
+
+      - name: Generate icons from SVG
+        run: node scripts/generate-icons.mjs
+
       - name: Build Tauri app
         run: npm run tauri build
-      
+
       - name: Upload .deb package
         uses: actions/upload-artifact@v4
         with:
           name: deaddrop-linux-deb
           path: src-tauri/target/release/bundle/deb/*.deb
-      
+
       - name: Upload .AppImage
         uses: actions/upload-artifact@v4
         with:
