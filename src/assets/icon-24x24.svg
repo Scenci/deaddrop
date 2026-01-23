@@ -1,0 +1,10 @@
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="24" height="24" fill="#0a0a0a"/>
+  <!-- White chevron -->
+  <path d="M3 3 L3 7 M3 3 L7 3" stroke="#ffffff" stroke-width="2" stroke-linecap="square"/>
+  <!-- D shape -->
+  <path d="M5 5 L5 21 L11 21 A8 8 0 0 0 11 5 Z" fill="#c41e3a"/>
+  <!-- Heavy horizontal cuts -->
+  <rect x="4" y="8" width="16" height="3" fill="#0a0a0a"/>
+  <rect x="4" y="14" width="16" height="3" fill="#0a0a0a"/>
+</svg>
