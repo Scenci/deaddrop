@@ -173,6 +173,7 @@ let connectedHost = "";
 let currentZoom = 1;
 let lastSelectedIndex: number = -1;
 let selectedSavedProfile: string | null = null;
+let currentTheme: "tokyo-night" | "blackout" = "blackout";
 
 // Custom drag state
 let isMouseDragging = false;
@@ -191,6 +192,44 @@ let queueManager: UploadQueueManager;
 let renderQueued = false;
 let lastRenderTime = 0;
 const RENDER_THROTTLE_MS = 100;
+
+// ============ THEME MANAGEMENT ============
+
+function initializeTheme() {
+  const savedTheme = localStorage.getItem("deaddrop-theme") as "tokyo-night" | "blackout" | null;
+  currentTheme = savedTheme || "blackout";
+  applyTheme(currentTheme);
+}
+
+function applyTheme(theme: "tokyo-night" | "blackout") {
+  document.documentElement.setAttribute("data-theme", theme);
+  currentTheme = theme;
+  localStorage.setItem("deaddrop-theme", theme);
+  updateThemeButtons();
+}
+
+function updateThemeButtons() {
+  const tokyoBtn = document.getElementById("theme-tokyo");
+  const blackoutBtn = document.getElementById("theme-blackout");
+
+  if (tokyoBtn && blackoutBtn) {
+    tokyoBtn.classList.toggle("active", currentTheme === "tokyo-night");
+    blackoutBtn.classList.toggle("active", currentTheme === "blackout");
+  }
+}
+
+function setupThemeToggle() {
+  const tokyoBtn = document.getElementById("theme-tokyo");
+  const blackoutBtn = document.getElementById("theme-blackout");
+
+  if (tokyoBtn) {
+    tokyoBtn.addEventListener("click", () => applyTheme("tokyo-night"));
+  }
+
+  if (blackoutBtn) {
+    blackoutBtn.addEventListener("click", () => applyTheme("blackout"));
+  }
+}
 
 // DOM Elements
 let localFileList: HTMLElement;
@@ -284,6 +323,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   });
 
   // Initialize
+  initializeTheme();
+  setupThemeToggle();
   setupProgressListener();
   setupTauriDragDrop();
   setupCustomDrag();
@@ -308,6 +349,15 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   zoomInBtn.addEventListener("click", () => updateZoom(0.1));
   zoomOutBtn.addEventListener("click", () => updateZoom(-0.1));
+
+  // Ctrl+Scroll to zoom
+  document.addEventListener("wheel", (e: WheelEvent) => {
+    if (e.ctrlKey) {
+      e.preventDefault();
+      const delta = e.deltaY < 0 ? 0.1 : -0.1;
+      updateZoom(delta);
+    }
+  }, { passive: false });
 
   // Connection modal - open
   connectBtn.addEventListener("click", () => {
@@ -1139,8 +1189,10 @@ function startCustomDrag(e: MouseEvent, path: string) {
   dragGhost.style.top = e.clientY + 10 + "px";
   document.body.appendChild(dragGhost);
 
-  dropZone.classList.add("custom-drag-active");
-  remoteFileList.classList.add("custom-drag-active");
+  if (isConnected) {
+    dropZone.classList.add("custom-drag-active");
+    remoteFileList.classList.add("custom-drag-active");
+  }
 
   document.body.style.userSelect = "none";
 }
@@ -1160,16 +1212,24 @@ function updateCustomDrag(e: MouseEvent) {
     (el) => el === remoteFileList || remoteFileList.contains(el)
   );
 
-  dropZone.classList.toggle("custom-drag-hover", overDropZone);
+  const overDropTarget = overDropZone || overRemoteList;
+
+  dropZone.classList.toggle("custom-drag-hover", overDropZone && isConnected);
   remoteFileList.classList.toggle(
     "custom-drag-hover",
     overRemoteList && isConnected
   );
 
-  if ((overDropZone || overRemoteList) && isConnected) {
+  // Show appropriate state on drag ghost
+  if (overDropTarget && isConnected) {
     dragGhost.classList.add("can-drop");
+    dragGhost.classList.remove("no-drop");
+  } else if (overDropTarget && !isConnected) {
+    dragGhost.classList.remove("can-drop");
+    dragGhost.classList.add("no-drop");
   } else {
     dragGhost.classList.remove("can-drop");
+    dragGhost.classList.remove("no-drop");
   }
 }
 

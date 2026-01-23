@@ -1,3 +1,0 @@
-a. Deaddrop debugging issues with attempt to upload a file while a file is already currently uploading - possibly uploading a directory is the issue.
-b. While Navigating to a different directory in the UI / Search (remote), while uploading multiple files at the same time, the GUI hangs and "windows" begins to crash the program until those files that are queued and uploading are completed 100%. 
-c. Evaluate any mutex locks or issues relating to GUI-navigation-while-uploading that is causing hanging/crashing behavior and fix them. 

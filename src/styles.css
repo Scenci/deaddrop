@@ -5,7 +5,28 @@
   padding: 0;
 }
 
-:root {
+/* ============ THEME: Blackout (Default) ============ */
+:root,
+[data-theme="blackout"] {
+  --bg-primary: #000000;
+  --bg-secondary: #0a0a0a;
+  --bg-tertiary: #121212;
+  --bg-hover: #1a1a1a;
+  --border-color: #2a2a2a;
+  --text-primary: #ffffff;
+  --text-secondary: #888888;
+  --accent: #dc2626;
+  --accent-hover: #ef4444;
+  --local-accent: #dc2626;
+  --remote-accent: #dc2626;
+  --success: #3fb950;
+  --error: #f85149;
+  --warning: #d29922;
+  --zoom: 1;
+}
+
+/* ============ THEME: Tokyo Night ============ */
+[data-theme="tokyo-night"] {
   --bg-primary: #0f1419;
   --bg-secondary: #1c2128;
   --bg-tertiary: #252c35;
@@ -15,12 +36,8 @@
   --text-secondary: #8b949e;
   --accent: #58a6ff;
   --accent-hover: #79b8ff;
-  --success: #3fb950;
-  --error: #f85149;
-  --warning: #d29922;
   --local-accent: #58a6ff;
   --remote-accent: #a371f7;
-  --zoom: 1;
 }
 
 body {
@@ -101,12 +118,18 @@ body {
   width: 26px;
   height: 26px;
   padding: 0;
-  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: transparent;
   border: none;
   color: var(--text-secondary);
   border-radius: 4px;
   cursor: pointer;
+}
+
+.zoom-controls button svg {
+  display: block;
 }
 
 .zoom-controls button:hover {
@@ -757,13 +780,6 @@ button.danger:hover {
   pointer-events: none;
 }
 
-/* ============ CUSTOM DRAG SYSTEM ============ */
-
-.drag-ghost.can-drop {
-  border-color: var(--success);
-  background: var(--bg-tertiary);
-}
-
 .custom-drag-active {
   position: relative;
 }
@@ -808,6 +824,17 @@ button.danger:hover {
 .drag-ghost.can-drop {
   border-color: var(--success);
   background: var(--bg-tertiary);
+}
+
+.drag-ghost.no-drop {
+  border-color: var(--error);
+  background: var(--bg-tertiary);
+}
+
+.drag-ghost.no-drop::after {
+  content: " - Connection required";
+  color: var(--error);
+  font-size: calc(11px * var(--zoom));
 }
 
 /* Drop zone visual states */
@@ -1108,3 +1135,45 @@ button.danger:hover {
 .profiles-section {
   margin-top: 0; /* don't stack extra top margin */
 }
+
+/* ============ THEME TOGGLE ============ */
+.theme-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 4px;
+}
+
+.theme-toggle-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  padding: 0 10px;
+  font-size: 11px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.theme-toggle-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.theme-toggle-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.theme-toggle-btn.active:hover {
+  background: var(--accent-hover);
+}
+
