@@ -43,6 +43,128 @@ interface ConnectionProfile {
   username: string;
 }
 
+// ============ UPLOAD QUEUE MANAGER ============
+
+class UploadQueueManager {
+  private queue: QueuedFile[] = [];
+  private activeUploads: Map<string, Promise<void>> = new Map();
+  private processingPromise: Promise<void> | null = null;
+  private maxConcurrent: number;
+  private renderCallback: () => void;
+  private onAllCompleteCallback: () => void;
+
+  constructor(maxConcurrent: number = 2, renderCallback: () => void, onAllCompleteCallback: () => void) {
+    this.maxConcurrent = maxConcurrent;
+    this.renderCallback = renderCallback;
+    this.onAllCompleteCallback = onAllCompleteCallback;
+  }
+
+  getQueue(): QueuedFile[] {
+    return this.queue;
+  }
+
+  getQueueLength(): number {
+    return this.queue.length;
+  }
+
+  getCompleteCount(): number {
+    return this.queue.filter(f => f.status === "complete").length;
+  }
+
+  getErrorCount(): number {
+    return this.queue.filter(f => f.status === "error").length;
+  }
+
+  addFile(file: QueuedFile): void {
+    this.queue.push(file);
+  }
+
+  removeFile(id: string): void {
+    this.queue = this.queue.filter(f => f.id !== id);
+    this.renderCallback();
+  }
+
+  clearCompleted(): void {
+    this.queue = this.queue.filter(f => f.status === "pending" || f.status === "uploading");
+    this.renderCallback();
+  }
+
+  updateProgress(localPath: string, percent: number): void {
+    const file = this.queue.find(f => f.localPath === localPath && f.status === "uploading");
+    if (file) {
+      file.progress = percent;
+    }
+  }
+
+  findByLocalPath(localPath: string): QueuedFile | undefined {
+    return this.queue.find(f => f.localPath === localPath && f.status === "uploading");
+  }
+
+  async processQueue(): Promise<void> {
+    // If already processing, wait for existing processing to complete then continue
+    if (this.processingPromise) {
+      await this.processingPromise;
+    }
+
+    this.processingPromise = this.doProcessQueue();
+    await this.processingPromise;
+    this.processingPromise = null;
+  }
+
+  private async doProcessQueue(): Promise<void> {
+    while (true) {
+      const pendingFiles = this.queue.filter(f => f.status === "pending");
+
+      if (pendingFiles.length === 0 || this.activeUploads.size >= this.maxConcurrent) {
+        break;
+      }
+
+      const file = pendingFiles[0];
+      file.status = "uploading";
+      this.renderCallback();
+
+      const uploadPromise = this.uploadSingleFile(file).finally(() => {
+        this.activeUploads.delete(file.id);
+        // Continue processing queue after upload completes
+        this.processQueue();
+      });
+
+      this.activeUploads.set(file.id, uploadPromise);
+    }
+
+    // Check if all complete
+    const allComplete = this.queue.length > 0 &&
+      this.queue.every(f => f.status === "complete" || f.status === "error");
+
+    if (allComplete && this.activeUploads.size === 0) {
+      this.onAllCompleteCallback();
+    }
+  }
+
+  private async uploadSingleFile(file: QueuedFile): Promise<void> {
+    try {
+      if (file.isDirectory) {
+        await invoke<string>("create_remote_directory", {
+          remotePath: file.remotePath,
+        });
+        file.status = "complete";
+        file.progress = 100;
+      } else {
+        await invoke<string>("upload_file", {
+          localPath: file.localPath,
+          remotePath: file.remotePath,
+        });
+        file.status = "complete";
+        file.progress = 100;
+      }
+    } catch (error) {
+      file.status = "error";
+      file.error = String(error);
+    }
+    this.renderCallback();
+  }
+}
+
 // State
 let localPath = "";
 let remotePath = "/";
@@ -62,11 +184,8 @@ let draggedItems: string[] = [];
 // Selection
 let selectedLocalFiles: Set<string> = new Set();
 
-// Upload queue
-let uploadQueue: QueuedFile[] = [];
-let isProcessingQueue = false;
-const MAX_CONCURRENT_UPLOADS = 2;
-let activeUploads = 0;
+// Upload queue manager (initialized in DOMContentLoaded)
+let queueManager: UploadQueueManager;
 
 // Render throttling
 let renderQueued = false;
@@ -104,6 +223,18 @@ window.addEventListener("DOMContentLoaded", async () => {
   remoteServerName = document.querySelector("#remote-server-name")!;
   uploadSelectedBtn = document.querySelector("#upload-selected-btn")!;
   dropZone = document.querySelector("#drop-zone")!;
+
+  // Initialize queue manager
+  queueManager = new UploadQueueManager(
+    2, // max concurrent uploads
+    () => renderQueue(), // render callback
+    async () => {
+      // on all complete callback - refresh remote directory
+      if (isConnected) {
+        await loadRemoteDirectory(remotePath);
+      }
+    }
+  );
 
   const connectBtn = document.querySelector<HTMLButtonElement>("#connect-btn")!;
   const modalClose = document.querySelector<HTMLButtonElement>("#modal-close")!;
@@ -309,10 +440,7 @@ modalConnect.addEventListener("click", async () => {
 
   // Queue clear
   queueClearBtn.addEventListener("click", () => {
-    uploadQueue = uploadQueue.filter(
-      (f) => f.status === "pending" || f.status === "uploading"
-    );
-    renderQueue();
+    queueManager.clearCompleted();
   });
 });
 
@@ -650,8 +778,8 @@ function renderFileList(
         e.stopPropagation();
         e.stopImmediatePropagation();
         
-        const message = isDir 
-          ? `Are you sure you want to delete "${name}"?\n\nNote: Directory must be empty to delete.`
+        const message = isDir
+          ? `Are you sure you want to delete "${name}" and all its contents? This action cannot be undone.`
           : `Are you sure you want to delete "${name}"?`;
         
         const confirmed = await showConfirm("Confirm Delete", message);
@@ -747,7 +875,7 @@ async function queueFilesForUpload(filePaths: string[]) {
               progress: 0,
               isDirectory: true,
             };
-            uploadQueue.push(queuedDir);
+            queueManager.addFile(queuedDir);
           } else {
             try {
               const exists = await invoke<boolean>("remote_file_exists", {
@@ -772,7 +900,7 @@ async function queueFilesForUpload(filePaths: string[]) {
               progress: 0,
               isDirectory: false,
             };
-            uploadQueue.push(queuedFile);
+            queueManager.addFile(queuedFile);
           }
         }
       } catch (error) {
@@ -807,33 +935,34 @@ async function queueFilesForUpload(filePaths: string[]) {
         progress: 0,
         isDirectory: false,
       };
-      uploadQueue.push(queuedFile);
+      queueManager.addFile(queuedFile);
     }
   }
 
   renderQueue();
-  processQueue();
+  queueManager.processQueue();
 }
 
 // ============ QUEUE ============
 
 function renderQueue() {
-  const complete = uploadQueue.filter((f) => f.status === "complete").length;
-  const errors = uploadQueue.filter((f) => f.status === "error").length;
-  const total = uploadQueue.length;
+  const queue = queueManager.getQueue();
+  const complete = queueManager.getCompleteCount();
+  const errors = queueManager.getErrorCount();
+  const total = queueManager.getQueueLength();
 
   queueStatusSpan.textContent =
     total > 0
       ? `${complete}/${total}${errors > 0 ? ` (${errors} failed)` : ""}`
       : "";
 
-  if (uploadQueue.length === 0) {
+  if (total === 0) {
     queueListDiv.innerHTML =
       '<div class="queue-empty">📭 No uploads in queue</div>';
     return;
   }
 
-  queueListDiv.innerHTML = uploadQueue
+  queueListDiv.innerHTML = queue
     .map((file) => {
       let statusIcon = "";
       let statusText = "";
@@ -884,76 +1013,18 @@ function renderQueue() {
   queueListDiv.querySelectorAll(".queue-remove-btn").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       const id = (e.target as HTMLElement).getAttribute("data-id")!;
-      uploadQueue = uploadQueue.filter((f) => f.id !== id);
-      renderQueue();
+      queueManager.removeFile(id);
     });
   });
-}
-
-async function processQueue() {
-  if (isProcessingQueue) return;
-  isProcessingQueue = true;
-
-  while (true) {
-    const pendingFiles = uploadQueue.filter((f) => f.status === "pending");
-
-    if (pendingFiles.length === 0 || activeUploads >= MAX_CONCURRENT_UPLOADS) {
-      break;
-    }
-
-    const file = pendingFiles[0];
-    file.status = "uploading";
-    activeUploads++;
-    renderQueue();
-
-    uploadSingleFile(file).finally(() => {
-      activeUploads--;
-      processQueue();
-    });
-  }
-
-  isProcessingQueue = false;
-
-  const allComplete = uploadQueue.every(
-    (f) => f.status === "complete" || f.status === "error"
-  );
-  if (allComplete && uploadQueue.length > 0 && isConnected) {
-    await loadRemoteDirectory(remotePath);
-  }
-}
-
-async function uploadSingleFile(file: QueuedFile) {
-  try {
-    if (file.isDirectory) {
-      await invoke<string>("create_remote_directory", {
-        remotePath: file.remotePath,
-      });
-      file.status = "complete";
-      file.progress = 100;
-    } else {
-      await invoke<string>("upload_file", {
-        localPath: file.localPath,
-        remotePath: file.remotePath,
-      });
-      file.status = "complete";
-      file.progress = 100;
-    }
-  } catch (error) {
-    file.status = "error";
-    file.error = String(error);
-  }
-  renderQueue();
 }
 
 function setupProgressListener() {
   listen<UploadProgress>("upload-progress", (event) => {
     const progress = event.payload;
-    const file = uploadQueue.find(
-      (f) => f.localPath === progress.local_path && f.status === "uploading"
-    );
+    const file = queueManager.findByLocalPath(progress.local_path);
     if (file) {
-      file.progress = progress.percent;
-      
+      queueManager.updateProgress(progress.local_path, progress.percent);
+
       // Update just the progress bar, not the entire queue
       const queueItem = queueListDiv.querySelector(`[data-id="${file.id}"]`);
       if (queueItem) {

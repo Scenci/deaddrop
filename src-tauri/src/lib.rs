@@ -1,4 +1,5 @@
 use ssh2::{OpenFlags, Session};
+use std::collections::VecDeque;
 use std::fs;
 use std::io::Read;
 use std::io::Write;
@@ -11,8 +12,108 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use keyring::Entry;
 
+#[derive(Clone)]
+struct ConnectionInfo {
+    host: String,
+    port: u16,
+    username: String,
+    password: String,
+}
+
+struct SessionPool {
+    sessions: VecDeque<Session>,
+    connection_info: Option<ConnectionInfo>,
+    max_sessions: usize,
+}
+
+impl SessionPool {
+    fn new(max_sessions: usize) -> Self {
+        SessionPool {
+            sessions: VecDeque::new(),
+            connection_info: None,
+            max_sessions,
+        }
+    }
+
+    fn create_session(info: &ConnectionInfo) -> Result<Session, String> {
+        let address = format!("{}:{}", info.host, info.port);
+
+        let tcp = TcpStream::connect_timeout(
+            &address
+                .parse()
+                .map_err(|e: std::net::AddrParseError| e.to_string())?,
+            Duration::from_secs(5),
+        )
+        .map_err(|e| format!("Connection failed: {}", e))?;
+
+        tcp.set_read_timeout(Some(Duration::from_secs(30)))
+            .map_err(|e| e.to_string())?;
+        tcp.set_write_timeout(Some(Duration::from_secs(30)))
+            .map_err(|e| e.to_string())?;
+
+        let mut session = Session::new().map_err(|e| e.to_string())?;
+        session.set_tcp_stream(tcp);
+        session
+            .handshake()
+            .map_err(|e| format!("Handshake failed: {}", e))?;
+
+        session.set_keepalive(true, 60);
+
+        session
+            .userauth_password(&info.username, &info.password)
+            .map_err(|e| format!("Authentication failed: {}", e))?;
+
+        if !session.authenticated() {
+            return Err("Authentication failed: Invalid credentials".into());
+        }
+
+        Ok(session)
+    }
+
+    fn is_session_alive(session: &Session) -> bool {
+        // Try to get sftp channel as a health check
+        session.sftp().is_ok()
+    }
+
+    fn acquire(&mut self) -> Result<Session, String> {
+        let info = self.connection_info.as_ref().ok_or("Not connected")?.clone();
+
+        // Try to reuse an existing session from the pool
+        while let Some(session) = self.sessions.pop_front() {
+            if Self::is_session_alive(&session) {
+                return Ok(session);
+            }
+            // Session is dead, drop it and try next
+        }
+
+        // No healthy sessions available, create a new one
+        Self::create_session(&info)
+    }
+
+    fn release(&mut self, session: Session) {
+        // Only keep up to max_sessions in the pool
+        if self.sessions.len() < self.max_sessions && Self::is_session_alive(&session) {
+            self.sessions.push_back(session);
+        }
+        // Otherwise drop the session
+    }
+
+    fn set_connection(&mut self, info: ConnectionInfo) {
+        self.connection_info = Some(info);
+    }
+
+    fn disconnect(&mut self) {
+        self.sessions.clear();
+        self.connection_info = None;
+    }
+
+    fn is_connected(&self) -> bool {
+        self.connection_info.is_some()
+    }
+}
+
 struct AppState {
-    session: Mutex<Option<Session>>,
+    pool: Mutex<SessionPool>,
 }
 
 unsafe impl Send for AppState {}
@@ -82,7 +183,7 @@ fn delete_local_file(path: String) -> Result<String, String> {
     let metadata = fs::metadata(&path).map_err(|e| format!("Failed to stat: {}", e))?;
 
     if metadata.is_dir() {
-        fs::remove_dir(&path).map_err(|e| format!("Failed to delete directory: {}", e))?;
+        fs::remove_dir_all(&path).map_err(|e| format!("Failed to delete directory: {}", e))?;
         Ok("Directory deleted".into())
     } else {
         fs::remove_file(&path).map_err(|e| format!("Failed to delete file: {}", e))?;
@@ -107,67 +208,50 @@ fn connect(
     profile_name: Option<String>,
     remember_password: bool,
 ) -> Result<String, String> {
-    let address = format!("{}:{}", host, port);
+    let info = ConnectionInfo {
+        host: host.clone(),
+        port,
+        username: username.clone(),
+        password: password.clone(),
+    };
 
-    let tcp = TcpStream::connect_timeout(
-        &address
-            .parse()
-            .map_err(|e: std::net::AddrParseError| e.to_string())?,
-        Duration::from_secs(5),
-    )
-    .map_err(|e| format!("Connection failed: {}", e))?;
+    // Test the connection first
+    let session = SessionPool::create_session(&info)?;
 
-    tcp.set_read_timeout(Some(Duration::from_secs(30)))
-        .map_err(|e| e.to_string())?;
-    tcp.set_write_timeout(Some(Duration::from_secs(30)))
-        .map_err(|e| e.to_string())?;
+    // Store connection info and the initial session in the pool
+    let mut pool = state.pool.lock().map_err(|e| e.to_string())?;
+    pool.set_connection(info);
+    pool.release(session);
 
-    let mut session = Session::new().map_err(|e| e.to_string())?;
-    session.set_tcp_stream(tcp);
-    session
-        .handshake()
-        .map_err(|e| format!("Handshake failed: {}", e))?;
-
-    session.set_keepalive(true, 60);
-
-    session
-        .userauth_password(&username, &password)
-        .map_err(|e| format!("Authentication failed: {}", e))?;
-
-    //Check if Authentication was successful
-    if session.authenticated() {
-        let mut stored_session = state.session.lock().map_err(|e| e.to_string())?;
-        *stored_session = Some(session);
-
-        if remember_password {
-            if let Some(name) = profile_name {
-                let entry = Entry::new("deaddrop", &name).map_err(|e| format!("Keyring error: {}", e))?;
-                entry.set_password(&password).map_err(|e| format!("Failed to save password: {}", e))?;
-            }
+    if remember_password {
+        if let Some(name) = profile_name {
+            let entry = Entry::new("deaddrop", &name).map_err(|e| format!("Keyring error: {}", e))?;
+            entry.set_password(&password).map_err(|e| format!("Failed to save password: {}", e))?;
         }
-        Ok("Authentication Successful".into())
-    } else {
-        Err("Authentication failed: Invalid credentials".into())
     }
+
+    Ok("Authentication Successful".into())
 }
 
 #[tauri::command]
 fn disconnect(state: State<'_, AppState>) -> Result<String, String> {
-    let mut stored_session = state.session.lock().map_err(|e| e.to_string())?;
-    *stored_session = None;
+    let mut pool = state.pool.lock().map_err(|e| e.to_string())?;
+    pool.disconnect();
     Ok("Disconnected".into())
 }
 
 #[tauri::command]
 fn is_connected(state: State<'_, AppState>) -> Result<bool, String> {
-    let session_guard = state.session.lock().map_err(|e| e.to_string())?;
-    Ok(session_guard.is_some())
+    let pool = state.pool.lock().map_err(|e| e.to_string())?;
+    Ok(pool.is_connected())
 }
 
 #[tauri::command]
 fn list_remote_dir(path: String, state: State<'_, AppState>) -> Result<Vec<FileEntry>, String> {
-    let session_guard = state.session.lock().map_err(|e| e.to_string())?;
-    let session = session_guard.as_ref().ok_or("Not connected")?;
+    let session = {
+        let mut pool = state.pool.lock().map_err(|e| e.to_string())?;
+        pool.acquire()?
+    };
 
     let sftp = session.sftp().map_err(|e| e.to_string())?;
     let entries = sftp
@@ -186,6 +270,12 @@ fn list_remote_dir(path: String, state: State<'_, AppState>) -> Result<Vec<FileE
         })
         .collect();
 
+    // Release session back to pool
+    {
+        let mut pool = state.pool.lock().map_err(|e| e.to_string())?;
+        pool.release(session);
+    }
+
     Ok(files)
 }
 
@@ -195,8 +285,10 @@ fn download_file(
     local_path: String,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    let session_guard = state.session.lock().map_err(|e| e.to_string())?;
-    let session = session_guard.as_ref().ok_or("Not connected")?;
+    let session = {
+        let mut pool = state.pool.lock().map_err(|e| e.to_string())?;
+        pool.acquire()?
+    };
 
     let sftp = session.sftp().map_err(|e| e.to_string())?;
 
@@ -214,52 +306,86 @@ fn download_file(
         .write_all(&contents)
         .map_err(|e| e.to_string())?;
 
-    Ok(format!("Downloaded {} bytes", contents.len()))
+    let bytes_downloaded = contents.len();
+
+    // Release session back to pool
+    {
+        let mut pool = state.pool.lock().map_err(|e| e.to_string())?;
+        pool.release(session);
+    }
+
+    Ok(format!("Downloaded {} bytes", bytes_downloaded))
+}
+
+fn delete_remote_recursive(sftp: &ssh2::Sftp, path: &Path) -> Result<(), String> {
+    let stat = sftp.stat(path).map_err(|e| format!("Failed to stat: {}", e))?;
+
+    if stat.is_dir() {
+        let entries = sftp.readdir(path).map_err(|e| format!("Failed to read directory: {}", e))?;
+        for (entry_path, _) in entries {
+            delete_remote_recursive(sftp, &entry_path)?;
+        }
+        sftp.rmdir(path).map_err(|e| format!("Failed to delete directory: {}", e))?;
+    } else {
+        sftp.unlink(path).map_err(|e| format!("Failed to delete file: {}", e))?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
 fn delete_remote_file(remote_path: String, state: State<'_, AppState>) -> Result<String, String> {
-    let session_guard = state.session.lock().map_err(|e| e.to_string())?;
-    let session = session_guard.as_ref().ok_or("Not Connected")?;
+    let session = {
+        let mut pool = state.pool.lock().map_err(|e| e.to_string())?;
+        pool.acquire()?
+    };
+
     let sftp = session.sftp().map_err(|e| e.to_string())?;
+    delete_remote_recursive(&sftp, Path::new(&remote_path))?;
 
-    let path = Path::new(&remote_path);
-
-    let stat = sftp
-        .stat(path)
-        .map_err(|e| format!("Failed to stat: {}", e))?;
-
-    if stat.is_dir() {
-        sftp.rmdir(path)
-            .map_err(|e| format!("Failed to delete directory: {}", e))?;
-        Ok("Directory deleted".into())
-    } else {
-        sftp.unlink(path)
-            .map_err(|e| format!("Failed to delete file: {}", e))?;
-        Ok("File deleted".into())
+    // Release session back to pool
+    {
+        let mut pool = state.pool.lock().map_err(|e| e.to_string())?;
+        pool.release(session);
     }
+
+    Ok("Deleted successfully".into())
 }
 
 #[tauri::command]
 fn remote_file_exists(remote_path: String, state: State<'_, AppState>) -> Result<bool, String> {
-    let session_guard = state.session.lock().map_err(|e| e.to_string())?;
-    let session = session_guard.as_ref().ok_or("Not Connected")?;
-    let sftp = session.sftp().map_err(|e| e.to_string())?;
+    let session = {
+        let mut pool = state.pool.lock().map_err(|e| e.to_string())?;
+        pool.acquire()?
+    };
 
-    match sftp.stat(Path::new(&remote_path)) {
-        Ok(_) => Ok(true),
-        Err(_) => Ok(false),
+    let sftp = session.sftp().map_err(|e| e.to_string())?;
+    let exists = sftp.stat(Path::new(&remote_path)).is_ok();
+
+    // Release session back to pool
+    {
+        let mut pool = state.pool.lock().map_err(|e| e.to_string())?;
+        pool.release(session);
     }
+
+    Ok(exists)
 }
 
 #[tauri::command]
 fn create_remote_directory(remote_path: String, state: State<'_, AppState>) -> Result<String, String> {
-    let session_guard = state.session.lock().map_err(|e| e.to_string())?;
-    let session = session_guard.as_ref().ok_or("Not Connected")?;
-    let sftp = session.sftp().map_err(|e| e.to_string())?;
+    let session = {
+        let mut pool = state.pool.lock().map_err(|e| e.to_string())?;
+        pool.acquire()?
+    };
 
+    let sftp = session.sftp().map_err(|e| e.to_string())?;
     sftp.mkdir(Path::new(&remote_path), 0o755)
         .map_err(|e| format!("Failed to create directory: {}", e))?;
+
+    // Release session back to pool
+    {
+        let mut pool = state.pool.lock().map_err(|e| e.to_string())?;
+        pool.release(session);
+    }
 
     Ok("Directory created".into())
 }
@@ -285,8 +411,12 @@ async fn upload_file(
     let file_name_clone = file_name.clone();
     let window_clone = window.clone();
 
-    let session_guard = state.session.lock().map_err(|e| e.to_string())?;
-    let session = session_guard.as_ref().ok_or("Not Connected")?;
+    // Acquire session from pool (briefly hold the lock)
+    let session = {
+        let mut pool = state.pool.lock().map_err(|e| e.to_string())?;
+        pool.acquire()?
+    };
+
     let sftp = session.sftp().map_err(|e| e.to_string())?;
 
     let mut local_file = fs::File::open(&local_path_clone)
@@ -337,6 +467,12 @@ async fn upload_file(
                 },
             );
         }
+    }
+
+    // Release session back to pool
+    {
+        let mut pool = state.pool.lock().map_err(|e| e.to_string())?;
+        pool.release(session);
     }
 
     Ok(format!("Uploaded {} bytes", bytes_sent))
@@ -408,7 +544,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
-            session: Mutex::new(None),
+            pool: Mutex::new(SessionPool::new(3)), // Max 3 concurrent sessions
         })
         .invoke_handler(tauri::generate_handler![
             ping,
