@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { save } from "@tauri-apps/plugin-dialog";
 
 interface FileEntry {
   name: string;
@@ -742,6 +743,7 @@ function renderFileList(
           <span class="file-name">${file.name}</span>
           <span class="file-size">${sizeText}</span>
           <div class="file-actions">
+            ${type === "remote" && !file.is_dir ? `<button class="download-btn small" title="Download"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>` : ""}
             <button class="delete-btn small danger">Delete</button>
           </div>
         </div>
@@ -846,6 +848,35 @@ function renderFileList(
           } catch (error) {
             showToast(`Delete failed: ${error}`, "error");
           }
+        }
+      });
+    }
+
+    // Download button (for remote files only)
+    const downloadBtn = item.querySelector(".download-btn");
+    if (downloadBtn) {
+      downloadBtn.addEventListener("click", async (e: Event) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+
+        try {
+          // Open save dialog with suggested filename
+          const savePath = await save({
+            defaultPath: name,
+            title: "Save file as",
+          });
+
+          if (savePath) {
+            showToast(`Downloading ${name}...`, "success");
+            await invoke("download_file", {
+              remotePath: path,
+              localPath: savePath,
+            });
+            showToast(`Downloaded ${name}`, "success");
+          }
+        } catch (error) {
+          showToast(`Download failed: ${error}`, "error");
         }
       });
     }

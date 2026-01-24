@@ -333,6 +333,26 @@ button.danger:hover {
   color: #fff;
 }
 
+button.download-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(4px * var(--zoom));
+  background: transparent;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+button.download-btn:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+button.download-btn svg {
+  width: calc(14px * var(--zoom));
+  height: calc(14px * var(--zoom));
+}
+
 /* ============ MAIN LAYOUT ============ */
 .main-layout {
   display: flex;
