@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Session notes (not for commit)
+SESSION_NOTES.md
