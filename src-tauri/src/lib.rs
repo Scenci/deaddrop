@@ -196,6 +196,53 @@ fn local_file_exists(path: String) -> Result<bool, String> {
     Ok(Path::new(&path).exists())
 }
 
+#[tauri::command]
+fn move_local_file(source: String, destination_dir: String) -> Result<String, String> {
+    let source_path = Path::new(&source);
+    let dest_dir = Path::new(&destination_dir);
+
+    // Validate source exists
+    if !source_path.exists() {
+        return Err(format!("Source does not exist: {}", source));
+    }
+
+    // Validate destination is a directory
+    if !dest_dir.is_dir() {
+        return Err(format!("Destination is not a directory: {}", destination_dir));
+    }
+
+    // Get the filename from source
+    let file_name = source_path
+        .file_name()
+        .ok_or_else(|| "Invalid source path".to_string())?;
+
+    // Build the full destination path
+    let dest_path = dest_dir.join(file_name);
+
+    // Prevent moving into itself (for directories)
+    if source_path.is_dir() {
+        let canonical_source = source_path.canonicalize()
+            .map_err(|e| format!("Failed to resolve source path: {}", e))?;
+        let canonical_dest = dest_dir.canonicalize()
+            .map_err(|e| format!("Failed to resolve destination path: {}", e))?;
+
+        if canonical_dest.starts_with(&canonical_source) {
+            return Err("Cannot move a directory into itself".to_string());
+        }
+    }
+
+    // Check if destination already exists
+    if dest_path.exists() {
+        return Err(format!("Destination already exists: {}", dest_path.display()));
+    }
+
+    // Perform the move
+    fs::rename(&source, &dest_path)
+        .map_err(|e| format!("Failed to move: {}", e))?;
+
+    Ok(format!("Moved to {}", dest_path.display()))
+}
+
 // ============ REMOTE (SSH/SFTP) COMMANDS ============
 
 #[tauri::command]
@@ -349,6 +396,76 @@ fn delete_remote_file(remote_path: String, state: State<'_, AppState>) -> Result
     }
 
     Ok("Deleted successfully".into())
+}
+
+#[tauri::command]
+fn move_remote_file(source: String, destination_dir: String, state: State<'_, AppState>) -> Result<String, String> {
+    let session = {
+        let mut pool = state.pool.lock().map_err(|e| e.to_string())?;
+        pool.acquire()?
+    };
+
+    let sftp = session.sftp().map_err(|e| e.to_string())?;
+
+    // Validate destination is a directory
+    let dest_stat = sftp.stat(Path::new(&destination_dir))
+        .map_err(|e| format!("Destination does not exist: {}", e))?;
+    if !dest_stat.is_dir() {
+        // Release session before returning error
+        let mut pool = state.pool.lock().map_err(|e| e.to_string())?;
+        pool.release(session);
+        return Err(format!("Destination is not a directory: {}", destination_dir));
+    }
+
+    // Get the filename from source path
+    let source_path = Path::new(&source);
+    let file_name = source_path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .ok_or_else(|| "Invalid source path".to_string())?;
+
+    // Build the full destination path (Unix-style for remote)
+    let dest_path = if destination_dir.ends_with('/') {
+        format!("{}{}", destination_dir, file_name)
+    } else {
+        format!("{}/{}", destination_dir, file_name)
+    };
+
+    // Check source exists and if it's a directory, prevent moving into itself
+    let source_stat = sftp.stat(source_path)
+        .map_err(|e| format!("Source does not exist: {}", e))?;
+
+    if source_stat.is_dir() {
+        // Prevent moving directory into itself
+        let normalized_source = source.trim_end_matches('/');
+        let normalized_dest = destination_dir.trim_end_matches('/');
+        if normalized_dest.starts_with(normalized_source) &&
+           (normalized_dest.len() == normalized_source.len() ||
+            normalized_dest.chars().nth(normalized_source.len()) == Some('/')) {
+            let mut pool = state.pool.lock().map_err(|e| e.to_string())?;
+            pool.release(session);
+            return Err("Cannot move a directory into itself".to_string());
+        }
+    }
+
+    // Check if destination file already exists
+    if sftp.stat(Path::new(&dest_path)).is_ok() {
+        let mut pool = state.pool.lock().map_err(|e| e.to_string())?;
+        pool.release(session);
+        return Err(format!("Destination already exists: {}", dest_path));
+    }
+
+    // Perform the rename/move
+    sftp.rename(Path::new(&source), Path::new(&dest_path), None)
+        .map_err(|e| format!("Failed to move: {}", e))?;
+
+    // Release session back to pool
+    {
+        let mut pool = state.pool.lock().map_err(|e| e.to_string())?;
+        pool.release(session);
+    }
+
+    Ok(format!("Moved to {}", dest_path))
 }
 
 #[tauri::command]
@@ -554,6 +671,7 @@ pub fn run() {
             list_local_dir_recursive,
             create_local_directory,
             delete_local_file,
+            move_local_file,
             local_file_exists,
             is_directory,
             // Remote
@@ -564,6 +682,7 @@ pub fn run() {
             download_file,
             upload_file,
             delete_remote_file,
+            move_remote_file,
             remote_file_exists,
             create_remote_directory,
             // Profiles
