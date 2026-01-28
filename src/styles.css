@@ -925,10 +925,70 @@ button.download-btn svg {
   background: rgba(63, 185, 80, 0.1);
 }
 
-/* Dim file items when dragging over */
+/* Dim file items when dragging over (for upload to remote) */
 .file-list.custom-drag-hover .file-item {
   opacity: 0.4;
   pointer-events: none;
+}
+
+/* ============ PARENT DIRECTORY ENTRY ============ */
+
+.file-item.parent-dir {
+  background: var(--bg-tertiary);
+  border-bottom: 2px solid var(--border-color);
+}
+
+.file-item.parent-dir .file-name {
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.file-item.parent-dir:hover {
+  background: var(--bg-hover);
+}
+
+/* ============ DROP TARGET (for move operations) ============ */
+
+/* Directory item as valid drop target */
+.file-item.drop-target {
+  background: rgba(63, 185, 80, 0.2) !important;
+  border: 2px dashed var(--success) !important;
+  border-radius: 4px;
+}
+
+.file-item.drop-target .file-icon {
+  transform: scale(1.1);
+  transition: transform 0.15s;
+}
+
+/* When dragging within same panel for move (not upload) */
+.file-list.move-drag-active {
+  position: relative;
+}
+
+.file-list.move-drag-active .file-item {
+  transition: background 0.15s, border 0.15s;
+}
+
+/* Highlight directories as potential drop targets during move */
+.file-list.move-drag-active .file-item[data-is-dir="true"]:not(.dragging-source) {
+  cursor: pointer;
+}
+
+.file-list.move-drag-active .file-item[data-is-dir="true"]:not(.dragging-source):hover {
+  background: rgba(63, 185, 80, 0.1);
+  border-left: 3px solid var(--success);
+}
+
+/* Mark the item being dragged */
+.file-item.dragging-source {
+  opacity: 0.5;
+  background: var(--bg-hover);
+}
+
+/* Selected remote files (for drag support) */
+.file-item.selected-remote {
+  background: rgba(163, 113, 247, 0.15);
 }
 
 /* ============ PROFILES ============ */

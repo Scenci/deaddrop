@@ -182,9 +182,13 @@ let dragStartPos = { x: 0, y: 0 };
 const dragThreshold = 5;
 let dragGhost: HTMLElement | null = null;
 let draggedItems: string[] = [];
+let dragOrigin: "local" | "remote" | null = null;
+let currentDropTarget: HTMLElement | null = null;
+let lastSelectedRemoteIndex: number = -1;
 
 // Selection
 let selectedLocalFiles: Set<string> = new Set();
+let selectedRemoteFiles: Set<string> = new Set();
 
 // Upload queue manager (initialized in DOMContentLoaded)
 let queueManager: UploadQueueManager;
@@ -657,6 +661,8 @@ async function loadRemoteDirectory(path: string) {
 
   try {
     remoteFileList.innerHTML = "<div class='loading'>⏳ Loading...</div>";
+    selectedRemoteFiles.clear();
+    lastSelectedRemoteIndex = -1;
 
     const files = await invoke<FileEntry[]>("list_remote_dir", { path });
 
@@ -711,12 +717,58 @@ async function createRemoteFolder() {
 
 // ============ FILE LIST RENDERING ============
 
+function getParentPath(currentPath: string, type: "local" | "remote"): string | null {
+  if (type === "remote") {
+    if (currentPath === "/" || currentPath === "") return null;
+    const parts = currentPath.split("/").filter(Boolean);
+    parts.pop();
+    return "/" + parts.join("/") || "/";
+  } else {
+    // Local path - handle both Windows and Unix
+    const isWindows = currentPath.includes("\\");
+    const separator = isWindows ? "\\" : "/";
+    const parts = currentPath.split(separator).filter(Boolean);
+
+    // Check if at root (e.g., "C:\" on Windows or "/" on Unix)
+    if (parts.length <= 1 && isWindows) return null; // At drive root like C:\
+    if (currentPath === "/") return null; // At Unix root
+
+    parts.pop();
+    if (isWindows) {
+      return parts.length === 1 ? parts[0] + "\\" : parts.join(separator);
+    }
+    return "/" + parts.join("/") || "/";
+  }
+}
+
 function renderFileList(
   container: HTMLElement,
   files: FileEntry[],
   type: "local" | "remote"
 ) {
-  container.innerHTML = files
+  const currentPath = type === "local" ? localPath : remotePath;
+  const parentPath = getParentPath(currentPath, type);
+
+  // Build HTML with optional parent directory entry
+  let html = "";
+
+  // Add ".." entry if not at root
+  if (parentPath !== null) {
+    html += `
+      <div class="file-item parent-dir"
+          data-name=".."
+          data-path="${parentPath}"
+          data-is-dir="true"
+          data-type="${type}">
+        <span class="file-icon">📂</span>
+        <span class="file-name">..</span>
+        <span class="file-size"></span>
+        <div class="file-actions"></div>
+      </div>
+    `;
+  }
+
+  html += files
     .map((file) => {
       const icon = file.is_dir ? "📁" : "📄";
       const sizeText = file.is_dir ? "" : formatSize(file.size);
@@ -734,10 +786,10 @@ function renderFileList(
           : `${remotePath}/${file.name}`;
 
       return `
-        <div class="file-item" 
-            data-name="${file.name}" 
+        <div class="file-item"
+            data-name="${file.name}"
             data-path="${fullPath}"
-            data-is-dir="${file.is_dir}" 
+            data-is-dir="${file.is_dir}"
             data-type="${type}">
           <span class="file-icon">${icon}</span>
           <span class="file-name">${file.name}</span>
@@ -750,6 +802,8 @@ function renderFileList(
       `;
     })
     .join("");
+
+  container.innerHTML = html;
 
   // Add event listeners
   container.querySelectorAll(".file-item").forEach((item) => {
@@ -769,58 +823,70 @@ function renderFileList(
       }
     });
 
-    // Single click to select (local items only)
-    if (itemType === "local") {
-      item.addEventListener("click", (e: Event) => {
+    // Single click to select (both local and remote items, but not "..")
+    item.addEventListener("click", (e: Event) => {
       const target = e.target as HTMLElement;
-          
-          // Exit early if clicking delete button or any of its children
-          if (target.closest(".delete-btn")) {
-            console.log("Selection handler: Ignoring delete button click");
-            return;
-          }
-          if (target.closest(".file-actions")) {
-            console.log("Selection handler: Ignoring file-actions click");
-            return;
-          }
 
-        const mouseEvent = e as MouseEvent;
-        if ((e.target as HTMLElement).closest(".delete-btn")) return;
+      // Exit early if clicking action buttons or ".." entry
+      if (target.closest(".delete-btn") || target.closest(".download-btn") || target.closest(".file-actions")) {
+        return;
+      }
 
-        const allItems = Array.from(container.querySelectorAll(".file-item"));
-        const currentIndex = allItems.indexOf(item);
+      // Don't allow selecting the ".." parent directory entry
+      if (name === "..") {
+        return;
+      }
 
-        if (mouseEvent.shiftKey && lastSelectedIndex !== -1) {
-          const start = Math.min(lastSelectedIndex, currentIndex);
-          const end = Math.max(lastSelectedIndex, currentIndex);
+      const mouseEvent = e as MouseEvent;
+      const allItems = Array.from(container.querySelectorAll(".file-item:not(.parent-dir)"));
+      const currentIndex = allItems.indexOf(item);
 
-          for (let i = start; i <= end; i++) {
-            const rangeItem = allItems[i] as HTMLElement;
-            const rangePath = rangeItem.getAttribute("data-path")!;
-            selectedLocalFiles.add(rangePath);
-            rangeItem.classList.add("selected");
-          }
-        } else if (mouseEvent.ctrlKey || mouseEvent.metaKey) {
-          if (selectedLocalFiles.has(path)) {
-            selectedLocalFiles.delete(path);
-            item.classList.remove("selected");
-          } else {
-            selectedLocalFiles.add(path);
-            item.classList.add("selected");
-          }
+      // Choose the right selection set and CSS class based on item type
+      const selectedSet = itemType === "local" ? selectedLocalFiles : selectedRemoteFiles;
+      const selectedClass = itemType === "local" ? "selected" : "selected";
+      const lastIndex = itemType === "local" ? lastSelectedIndex : lastSelectedRemoteIndex;
+
+      if (mouseEvent.shiftKey && lastIndex !== -1) {
+        const start = Math.min(lastIndex, currentIndex);
+        const end = Math.max(lastIndex, currentIndex);
+
+        for (let i = start; i <= end; i++) {
+          const rangeItem = allItems[i] as HTMLElement;
+          const rangePath = rangeItem.getAttribute("data-path")!;
+          selectedSet.add(rangePath);
+          rangeItem.classList.add(selectedClass);
+        }
+      } else if (mouseEvent.ctrlKey || mouseEvent.metaKey) {
+        if (selectedSet.has(path)) {
+          selectedSet.delete(path);
+          item.classList.remove(selectedClass);
+        } else {
+          selectedSet.add(path);
+          item.classList.add(selectedClass);
+        }
+        if (itemType === "local") {
           lastSelectedIndex = currentIndex;
         } else {
-          selectedLocalFiles.clear();
-          container.querySelectorAll(".file-item.selected").forEach((el) => {
-            el.classList.remove("selected");
-          });
-          selectedLocalFiles.add(path);
-          item.classList.add("selected");
-          lastSelectedIndex = currentIndex;
+          lastSelectedRemoteIndex = currentIndex;
         }
+      } else {
+        selectedSet.clear();
+        container.querySelectorAll(`.file-item.${selectedClass}`).forEach((el) => {
+          el.classList.remove(selectedClass);
+        });
+        selectedSet.add(path);
+        item.classList.add(selectedClass);
+        if (itemType === "local") {
+          lastSelectedIndex = currentIndex;
+        } else {
+          lastSelectedRemoteIndex = currentIndex;
+        }
+      }
+
+      if (itemType === "local") {
         updateUploadButton();
-      });
-    }
+      }
+    });
 
     // Delete button (for both local and remote)
     const deleteBtn = item.querySelector(".delete-btn");
@@ -1149,31 +1215,38 @@ function setupTauriDragDrop() {
 function setupCustomDrag() {
   let mouseDownTarget: HTMLElement | null = null;
   let mouseDownPath: string | null = null;
+  let mouseDownType: "local" | "remote" | null = null;
   let hasDragStarted = false;
 
-  localFileList.addEventListener("mousedown", (e: MouseEvent) => {
-    const fileItem = (e.target as HTMLElement).closest(
-      ".file-item"
-    ) as HTMLElement;
-    if (!fileItem) return;
-    if ((e.target as HTMLElement).closest(".delete-btn")) return;
-    if (fileItem.dataset.type !== "local") return;
+  // Helper to setup mousedown on a file list
+  function setupMouseDown(fileList: HTMLElement, type: "local" | "remote") {
+    fileList.addEventListener("mousedown", (e: MouseEvent) => {
+      const fileItem = (e.target as HTMLElement).closest(".file-item") as HTMLElement;
+      if (!fileItem) return;
+      if ((e.target as HTMLElement).closest(".delete-btn")) return;
+      if ((e.target as HTMLElement).closest(".download-btn")) return;
 
-    mouseDownTarget = fileItem;
-    mouseDownPath = fileItem.dataset.path || null;
-    dragStartPos = { x: e.clientX, y: e.clientY };
-    hasDragStarted = false;
-  });
+      mouseDownTarget = fileItem;
+      mouseDownPath = fileItem.dataset.path || null;
+      mouseDownType = type;
+      dragStartPos = { x: e.clientX, y: e.clientY };
+      hasDragStarted = false;
+    });
+  }
+
+  // Setup for both local and remote file lists
+  setupMouseDown(localFileList, "local");
+  setupMouseDown(remoteFileList, "remote");
 
   document.addEventListener("mousemove", (e: MouseEvent) => {
-    if (!mouseDownTarget || !mouseDownPath) return;
+    if (!mouseDownTarget || !mouseDownPath || !mouseDownType) return;
 
     const dx = Math.abs(e.clientX - dragStartPos.x);
     const dy = Math.abs(e.clientY - dragStartPos.y);
 
     if (!hasDragStarted && (dx > dragThreshold || dy > dragThreshold)) {
       hasDragStarted = true;
-      startCustomDrag(e, mouseDownPath);
+      startCustomDrag(e, mouseDownPath, mouseDownType);
     }
 
     if (hasDragStarted) {
@@ -1187,6 +1260,7 @@ function setupCustomDrag() {
     }
     mouseDownTarget = null;
     mouseDownPath = null;
+    mouseDownType = null;
     hasDragStarted = false;
   });
 
@@ -1196,31 +1270,60 @@ function setupCustomDrag() {
     }
     mouseDownTarget = null;
     mouseDownPath = null;
+    mouseDownType = null;
     hasDragStarted = false;
   });
 }
 
-function startCustomDrag(e: MouseEvent, path: string) {
-  if (selectedLocalFiles.has(path)) {
-    draggedItems = Array.from(selectedLocalFiles);
+function startCustomDrag(e: MouseEvent, path: string, origin: "local" | "remote") {
+  dragOrigin = origin;
+
+  // Get the items to drag based on selection
+  if (origin === "local") {
+    if (selectedLocalFiles.has(path)) {
+      draggedItems = Array.from(selectedLocalFiles);
+    } else {
+      draggedItems = [path];
+    }
+    // Mark dragged items visually
+    draggedItems.forEach(p => {
+      const item = localFileList.querySelector(`[data-path="${CSS.escape(p)}"]`);
+      item?.classList.add("dragging-source");
+    });
+    // Enable move mode on local panel
+    localFileList.classList.add("move-drag-active");
   } else {
-    draggedItems = [path];
+    if (selectedRemoteFiles.has(path)) {
+      draggedItems = Array.from(selectedRemoteFiles);
+    } else {
+      draggedItems = [path];
+    }
+    // Mark dragged items visually
+    draggedItems.forEach(p => {
+      const item = remoteFileList.querySelector(`[data-path="${CSS.escape(p)}"]`);
+      item?.classList.add("dragging-source");
+    });
+    // Enable move mode on remote panel
+    remoteFileList.classList.add("move-drag-active");
   }
 
   isMouseDragging = true;
 
+  // Create ghost element
   dragGhost = document.createElement("div");
   dragGhost.className = "drag-ghost";
 
   const count = draggedItems.length;
   const fileName = draggedItems[0].split(/[/\\]/).pop() || "file";
-  dragGhost.innerHTML = count > 1 ? `📦 ${count} items` : `📄 ${fileName}`;
+  const icon = origin === "local" ? "📄" : "🌐";
+  dragGhost.innerHTML = count > 1 ? `📦 ${count} items` : `${icon} ${fileName}`;
 
   dragGhost.style.left = e.clientX + 10 + "px";
   dragGhost.style.top = e.clientY + 10 + "px";
   document.body.appendChild(dragGhost);
 
-  if (isConnected) {
+  // For local files, also enable upload drop zone if connected
+  if (origin === "local" && isConnected) {
     dropZone.classList.add("custom-drag-active");
     remoteFileList.classList.add("custom-drag-active");
   }
@@ -1229,80 +1332,160 @@ function startCustomDrag(e: MouseEvent, path: string) {
 }
 
 function updateCustomDrag(e: MouseEvent) {
-  if (!dragGhost) return;
+  if (!dragGhost || !dragOrigin) return;
 
   dragGhost.style.left = e.clientX + 10 + "px";
   dragGhost.style.top = e.clientY + 10 + "px";
 
+  // Clear previous drop target highlight
+  if (currentDropTarget) {
+    currentDropTarget.classList.remove("drop-target");
+    currentDropTarget = null;
+  }
+
   const elementsUnder = document.elementsFromPoint(e.clientX, e.clientY);
 
-  const overDropZone = elementsUnder.some(
-    (el) => el === dropZone || dropZone.contains(el)
-  );
-  const overRemoteList = elementsUnder.some(
-    (el) => el === remoteFileList || remoteFileList.contains(el)
-  );
+  // Check for directory drop target in the SAME panel (for move operation)
+  const targetFileItem = elementsUnder.find(el =>
+    el.classList?.contains("file-item") &&
+    el.getAttribute("data-is-dir") === "true"
+  ) as HTMLElement | undefined;
 
-  const overDropTarget = overDropZone || overRemoteList;
+  if (targetFileItem) {
+    const targetType = targetFileItem.dataset.type;
+    const targetPath = targetFileItem.dataset.path;
 
-  dropZone.classList.toggle("custom-drag-hover", overDropZone && isConnected);
-  remoteFileList.classList.toggle(
-    "custom-drag-hover",
-    overRemoteList && isConnected
-  );
+    // Check if it's a valid move target (same panel, not dragging to itself)
+    if (targetType === dragOrigin && targetPath && !draggedItems.includes(targetPath)) {
+      // Check we're not trying to move a directory into its own subdirectory
+      const isValidTarget = !draggedItems.some(draggedPath => {
+        if (dragOrigin === "local") {
+          // For local, check path prefix (handle both / and \ separators)
+          const normalizedDragged = draggedPath.replace(/\\/g, "/");
+          const normalizedTarget = targetPath.replace(/\\/g, "/");
+          return normalizedTarget.startsWith(normalizedDragged + "/");
+        } else {
+          // For remote, always use /
+          return targetPath.startsWith(draggedPath + "/");
+        }
+      });
 
-  // Show appropriate state on drag ghost
-  if (overDropTarget && isConnected) {
-    dragGhost.classList.add("can-drop");
-    dragGhost.classList.remove("no-drop");
-  } else if (overDropTarget && !isConnected) {
-    dragGhost.classList.remove("can-drop");
-    dragGhost.classList.add("no-drop");
-  } else {
-    dragGhost.classList.remove("can-drop");
-    dragGhost.classList.remove("no-drop");
+      if (isValidTarget) {
+        currentDropTarget = targetFileItem;
+        currentDropTarget.classList.add("drop-target");
+        dragGhost.classList.add("can-drop");
+        dragGhost.classList.remove("no-drop");
+        return;
+      }
+    }
   }
+
+  // For local files, also check upload drop zones
+  if (dragOrigin === "local") {
+    const overDropZone = elementsUnder.some(
+      (el) => el === dropZone || dropZone.contains(el)
+    );
+    const overRemoteList = elementsUnder.some(
+      (el) => el === remoteFileList || remoteFileList.contains(el)
+    );
+
+    // Only highlight for upload if not over a specific directory target
+    const overUploadTarget = (overDropZone || overRemoteList) && !currentDropTarget;
+
+    dropZone.classList.toggle("custom-drag-hover", overDropZone && isConnected && !currentDropTarget);
+    remoteFileList.classList.toggle("custom-drag-hover", overRemoteList && isConnected && !currentDropTarget);
+
+    if (overUploadTarget && isConnected) {
+      dragGhost.classList.add("can-drop");
+      dragGhost.classList.remove("no-drop");
+      return;
+    } else if (overUploadTarget && !isConnected) {
+      dragGhost.classList.remove("can-drop");
+      dragGhost.classList.add("no-drop");
+      return;
+    }
+  }
+
+  // No valid drop target
+  dragGhost.classList.remove("can-drop", "no-drop");
 }
 
 async function endCustomDrag(e: MouseEvent) {
-  if (!isMouseDragging || draggedItems.length === 0) {
+  if (!isMouseDragging || draggedItems.length === 0 || !dragOrigin) {
     cancelCustomDrag();
     return;
   }
 
   const elementsUnder = document.elementsFromPoint(e.clientX, e.clientY);
-  const overDropZone = elementsUnder.some(
-    (el) => el === dropZone || dropZone.contains(el)
-  );
-  const overRemoteList = elementsUnder.some(
-    (el) => el === remoteFileList || remoteFileList.contains(el)
-  );
+  const items = [...draggedItems];
+  const origin = dragOrigin;
 
-  const validDrop = (overDropZone || overRemoteList) && isConnected;
+  // Check if dropping on a directory target (for move operation)
+  if (currentDropTarget) {
+    const targetPath = currentDropTarget.dataset.path!;
+    cleanupCustomDrag();
 
-  cleanupCustomDrag();
+    // Perform move operation
+    try {
+      for (const sourcePath of items) {
+        if (origin === "local") {
+          await invoke("move_local_file", { source: sourcePath, destinationDir: targetPath });
+        } else {
+          await invoke("move_remote_file", { source: sourcePath, destinationDir: targetPath });
+        }
+      }
+      showToast(`Moved ${items.length} item${items.length > 1 ? "s" : ""}`, "success");
 
-  if (validDrop) {
-    const items = [...draggedItems];
-    draggedItems = [];
-
-    await queueFilesForUpload(items);
-
-    selectedLocalFiles.clear();
-    document
-      .querySelectorAll("#local-file-list .file-item.selected")
-      .forEach((el) => {
-        el.classList.remove("selected");
-      });
-    updateUploadButton();
-  } else if (!isConnected && (overDropZone || overRemoteList)) {
-    alert("⚠️ Please connect to a server first");
+      // Refresh the appropriate directory
+      if (origin === "local") {
+        selectedLocalFiles.clear();
+        await loadLocalDirectory(localPath);
+      } else {
+        selectedRemoteFiles.clear();
+        await loadRemoteDirectory(remotePath);
+      }
+    } catch (error) {
+      showToast(`Move failed: ${error}`, "error");
+    }
+    return;
   }
+
+  // For local files, check upload drop zones
+  if (origin === "local") {
+    const overDropZone = elementsUnder.some(
+      (el) => el === dropZone || dropZone.contains(el)
+    );
+    const overRemoteList = elementsUnder.some(
+      (el) => el === remoteFileList || remoteFileList.contains(el)
+    );
+
+    const validUpload = (overDropZone || overRemoteList) && isConnected;
+
+    cleanupCustomDrag();
+
+    if (validUpload) {
+      await queueFilesForUpload(items);
+      selectedLocalFiles.clear();
+      document
+        .querySelectorAll("#local-file-list .file-item.selected")
+        .forEach((el) => {
+          el.classList.remove("selected");
+        });
+      updateUploadButton();
+    } else if (!isConnected && (overDropZone || overRemoteList)) {
+      showToast("Please connect to a server first", "error");
+    }
+    return;
+  }
+
+  // No valid drop
+  cleanupCustomDrag();
 }
 
 function cancelCustomDrag() {
   cleanupCustomDrag();
   draggedItems = [];
+  dragOrigin = null;
 }
 
 function cleanupCustomDrag() {
@@ -1313,9 +1496,24 @@ function cleanupCustomDrag() {
     dragGhost = null;
   }
 
+  // Clear drop target highlight
+  if (currentDropTarget) {
+    currentDropTarget.classList.remove("drop-target");
+    currentDropTarget = null;
+  }
+
+  // Clear dragging source markers
+  document.querySelectorAll(".dragging-source").forEach(el => {
+    el.classList.remove("dragging-source");
+  });
+
+  // Clear all drag-related classes
   dropZone.classList.remove("custom-drag-active", "custom-drag-hover");
-  remoteFileList.classList.remove("custom-drag-active", "custom-drag-hover");
+  remoteFileList.classList.remove("custom-drag-active", "custom-drag-hover", "move-drag-active");
+  localFileList.classList.remove("move-drag-active");
   document.body.style.userSelect = "";
+
+  dragOrigin = null;
 }
 
 
