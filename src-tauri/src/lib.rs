@@ -689,7 +689,9 @@ pub fn run() {
             get_profiles,
             save_profile,
             delete_profile,
-            get_profile_password
+            get_profile_password,
+            get_last_used_profile,
+            set_last_used_profile
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -706,6 +708,8 @@ struct ConnectionProfile {
 #[derive(Serialize, Deserialize)]
 struct ProfilesData {
     profiles: Vec<ConnectionProfile>,
+    #[serde(default)]
+    last_used: Option<String>,
 }
 
 fn get_profiles_path() -> Result<PathBuf, String> {
@@ -723,72 +727,85 @@ fn get_profiles_path() -> Result<PathBuf, String> {
     Ok(deaddrop_dir.join("profiles.json"))
 }
 
-#[tauri::command]
-fn get_profiles() -> Result<Vec<ConnectionProfile>, String> {
+fn load_profiles_data() -> Result<ProfilesData, String> {
     let path = get_profiles_path()?;
-    
+
     if !path.exists() {
-        return Ok(Vec::new());
+        return Ok(ProfilesData { profiles: Vec::new(), last_used: None });
     }
-    
+
     let contents = fs::read_to_string(&path)
         .map_err(|e| format!("Failed to read profiles: {}", e))?;
-    
-    let data: ProfilesData = serde_json::from_str(&contents)
-        .map_err(|e| format!("Failed to parse profiles: {}", e))?;
-    
-    Ok(data.profiles)
+
+    serde_json::from_str(&contents)
+        .map_err(|e| format!("Failed to parse profiles: {}", e))
+}
+
+fn save_profiles_data(data: &ProfilesData) -> Result<(), String> {
+    let path = get_profiles_path()?;
+    let json = serde_json::to_string_pretty(data)
+        .map_err(|e| format!("Failed to serialize profiles: {}", e))?;
+    fs::write(&path, json)
+        .map_err(|e| format!("Failed to write profiles: {}", e))
+}
+
+#[tauri::command]
+fn get_profiles() -> Result<Vec<ConnectionProfile>, String> {
+    Ok(load_profiles_data()?.profiles)
+}
+
+#[tauri::command]
+fn get_last_used_profile() -> Result<Option<String>, String> {
+    Ok(load_profiles_data()?.last_used)
+}
+
+#[tauri::command]
+fn set_last_used_profile(name: String) -> Result<(), String> {
+    let mut data = load_profiles_data()?;
+    data.last_used = Some(name);
+    save_profiles_data(&data)
 }
 
 #[tauri::command]
 fn save_profile(name: String, host: String, port: u16, username: String) -> Result<String, String> {
-    let path = get_profiles_path()?;
-    
-    let mut profiles = get_profiles().unwrap_or_default();
-    
+    let mut data = load_profiles_data().unwrap_or(ProfilesData { profiles: Vec::new(), last_used: None });
+
     // Check if profile with same name exists, update it
-    if let Some(existing) = profiles.iter_mut().find(|p| p.name == name) {
+    if let Some(existing) = data.profiles.iter_mut().find(|p| p.name == name) {
         existing.host = host;
         existing.port = port;
         existing.username = username;
     } else {
         // Check max profiles limit
-        if profiles.len() >= 3 {
+        if data.profiles.len() >= 3 {
             return Err("Maximum of 3 profiles allowed. Delete one first.".to_string());
         }
-        
-        profiles.push(ConnectionProfile {
+
+        data.profiles.push(ConnectionProfile {
             name,
             host,
             port,
             username,
         });
     }
-    
-    let data = ProfilesData { profiles };
-    let json = serde_json::to_string_pretty(&data)
-        .map_err(|e| format!("Failed to serialize profiles: {}", e))?;
-    
-    fs::write(&path, json)
-        .map_err(|e| format!("Failed to write profiles: {}", e))?;
-    
+
+    save_profiles_data(&data)?;
+
     Ok("Profile saved".to_string())
 }
 
 #[tauri::command]
 fn delete_profile(name: String) -> Result<String, String> {
-    let path = get_profiles_path()?;
-    
-    let mut profiles = get_profiles().unwrap_or_default();
-    profiles.retain(|p| p.name != name);
-    
-    let data = ProfilesData { profiles };
-    let json = serde_json::to_string_pretty(&data)
-        .map_err(|e| format!("Failed to serialize profiles: {}", e))?;
-    
-    fs::write(&path, json)
-        .map_err(|e| format!("Failed to write profiles: {}", e))?;
-    
+    let mut data = load_profiles_data().unwrap_or(ProfilesData { profiles: Vec::new(), last_used: None });
+    data.profiles.retain(|p| p.name != name);
+
+    // Clear last_used if it was the deleted profile
+    if data.last_used.as_deref() == Some(&name) {
+        data.last_used = None;
+    }
+
+    save_profiles_data(&data)?;
+
     Ok("Profile deleted".to_string())
 }
 
