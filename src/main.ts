@@ -171,6 +171,7 @@ let localPath = "";
 let remotePath = "/";
 let isConnected = false;
 let connectedHost = "";
+let connectedPort = 22;
 let currentZoom = 1;
 let lastSelectedIndex: number = -1;
 let selectedSavedProfile: string | null = null;
@@ -193,10 +194,109 @@ let selectedRemoteFiles: Set<string> = new Set();
 // Upload queue manager (initialized in DOMContentLoaded)
 let queueManager: UploadQueueManager;
 
+// Idle timeout state
+let idleTimeoutMinutes = 30;
+let lastActivityTime = Date.now();
+let idleCheckInterval: number | null = null;
+let idleWarningShown = false;
+
 // Render throttling
 let renderQueued = false;
 let lastRenderTime = 0;
 const RENDER_THROTTLE_MS = 100;
+
+// ============ RECENT DIRECTORIES ============
+
+function getRecentLocalDirs(): string[] {
+  try {
+    const raw = localStorage.getItem("deaddrop-recent-local");
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function addRecentLocalDir(path: string): void {
+  try {
+    let dirs = getRecentLocalDirs();
+    dirs = dirs.filter(d => d !== path);
+    dirs.unshift(path);
+    dirs = dirs.slice(0, 5);
+    localStorage.setItem("deaddrop-recent-local", JSON.stringify(dirs));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function getRecentRemoteDirs(): string[] {
+  if (!connectedHost) return [];
+  try {
+    const raw = localStorage.getItem("deaddrop-recent-remote");
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    const key = connectedHost + ":" + connectedPort;
+    const dirs = parsed[key];
+    return Array.isArray(dirs) ? dirs : [];
+  } catch {
+    return [];
+  }
+}
+
+function addRecentRemoteDir(path: string): void {
+  if (!connectedHost) return;
+  try {
+    const raw = localStorage.getItem("deaddrop-recent-remote");
+    const store = raw ? JSON.parse(raw) : {};
+    const key = connectedHost + ":" + connectedPort;
+    let dirs: string[] = Array.isArray(store[key]) ? store[key] : [];
+    dirs = dirs.filter(d => d !== path);
+    dirs.unshift(path);
+    dirs = dirs.slice(0, 5);
+    store[key] = dirs;
+    localStorage.setItem("deaddrop-recent-remote", JSON.stringify(store));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function showRecentDropdown(
+  dropdown: HTMLElement,
+  dirs: string[],
+  onSelect: (path: string) => void
+): void {
+  if (dirs.length === 0) {
+    dropdown.classList.remove("visible");
+    return;
+  }
+
+  dropdown.innerHTML =
+    '<div class="recent-dropdown-header">Recent directories</div>' +
+    dirs
+      .map(
+        (d) =>
+          `<div class="recent-dropdown-item" title="${d}">${d}</div>`
+      )
+      .join("");
+
+  dropdown.classList.add("visible");
+
+  dropdown.querySelectorAll(".recent-dropdown-item").forEach((item) => {
+    item.addEventListener("mousedown", (e) => {
+      e.preventDefault(); // prevent blur from firing before click
+      const path = (item as HTMLElement).getAttribute("title")!;
+      hideAllDropdowns();
+      onSelect(path);
+    });
+  });
+}
+
+function hideAllDropdowns(): void {
+  document.querySelectorAll(".recent-dropdown").forEach((d) => {
+    d.classList.remove("visible");
+  });
+}
 
 // ============ THEME MANAGEMENT ============
 
@@ -234,6 +334,61 @@ function setupThemeToggle() {
   if (blackoutBtn) {
     blackoutBtn.addEventListener("click", () => applyTheme("blackout"));
   }
+}
+
+// ============ IDLE TIMEOUT ============
+
+function loadIdleTimeoutSetting(): number {
+  try {
+    const raw = localStorage.getItem("deaddrop-idle-timeout");
+    if (raw === null) return 30;
+    const val = parseInt(raw, 10);
+    if (isNaN(val) || val < 0) return 30;
+    return val;
+  } catch {
+    return 30;
+  }
+}
+
+function saveIdleTimeoutSetting(minutes: number): void {
+  try {
+    localStorage.setItem("deaddrop-idle-timeout", String(minutes));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function resetIdleTimer(): void {
+  lastActivityTime = Date.now();
+  idleWarningShown = false;
+}
+
+function startIdleTimer(): void {
+  stopIdleTimer();
+  if (idleTimeoutMinutes === 0) return;
+
+  idleCheckInterval = window.setInterval(() => {
+    const elapsed = Date.now() - lastActivityTime;
+    const timeoutMs = idleTimeoutMinutes * 60_000;
+    const warningMs = (idleTimeoutMinutes - 1) * 60_000;
+
+    if (elapsed >= timeoutMs) {
+      disconnectFromServer();
+      stopIdleTimer();
+      showToast("Disconnected due to inactivity", "error", 5000);
+    } else if (elapsed >= warningMs && !idleWarningShown) {
+      idleWarningShown = true;
+      showToast("Idle timeout in 1 minute \u2014 interact to stay connected", "error", 10000);
+    }
+  }, 15_000);
+}
+
+function stopIdleTimer(): void {
+  if (idleCheckInterval !== null) {
+    clearInterval(idleCheckInterval);
+    idleCheckInterval = null;
+  }
+  idleWarningShown = false;
 }
 
 // DOM Elements
@@ -327,6 +482,49 @@ window.addEventListener("DOMContentLoaded", async () => {
     filterFileList(remoteFileList, remoteSearchInput.value);
   });
 
+  // Recent directory dropdowns
+  const localRecentDropdown = document.getElementById("local-recent-dropdown")!;
+  const remoteRecentDropdown = document.getElementById("remote-recent-dropdown")!;
+
+  localPathInput.addEventListener("focus", () => {
+    showRecentDropdown(localRecentDropdown, getRecentLocalDirs(), (path) => {
+      loadLocalDirectory(path);
+    });
+  });
+
+  localPathInput.addEventListener("blur", () => {
+    setTimeout(() => hideAllDropdowns(), 150);
+  });
+
+  remotePathInput.addEventListener("focus", () => {
+    showRecentDropdown(remoteRecentDropdown, getRecentRemoteDirs(), (path) => {
+      loadRemoteDirectory(path);
+    });
+  });
+
+  remotePathInput.addEventListener("blur", () => {
+    setTimeout(() => hideAllDropdowns(), 150);
+  });
+
+  localPathInput.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") hideAllDropdowns();
+  });
+
+  remotePathInput.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") hideAllDropdowns();
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!(e.target as HTMLElement).closest(".path-input-wrapper")) {
+      hideAllDropdowns();
+    }
+  });
+
+  // Idle timeout select
+  const idleTimeoutSelect = document.querySelector<HTMLSelectElement>("#idle-timeout")!;
+  idleTimeoutMinutes = loadIdleTimeoutSetting();
+  idleTimeoutSelect.value = String(idleTimeoutMinutes);
+
   // Initialize
   initializeTheme();
   setupThemeToggle();
@@ -372,6 +570,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       connectionModal.classList.remove("hidden");
       connectStatus.textContent = "";  // Clear any previous error
       connectStatus.className = "";    // Reset class
+      idleTimeoutSelect.value = String(idleTimeoutMinutes);
       renderProfiles();
       hostInput.focus();
     }
@@ -426,8 +625,20 @@ modalConnect.addEventListener("click", async () => {
     
     isConnected = true;
     connectedHost = host;
+    connectedPort = port;
     connectionModal.classList.add("hidden");
-    
+
+    // Start idle timer
+    idleTimeoutMinutes = parseInt(idleTimeoutSelect.value, 10) || 0;
+    saveIdleTimeoutSetting(idleTimeoutMinutes);
+    resetIdleTimer();
+    startIdleTimer();
+
+    // Track last-used profile
+    if (selectedSavedProfile) {
+      invoke("set_last_used_profile", { name: selectedSavedProfile }).catch(console.error);
+    }
+
     passwordInput.value = "";
     connectStatus.textContent = "";
     
@@ -476,7 +687,10 @@ modalConnect.addEventListener("click", async () => {
   localBackBtn.addEventListener("click", () => navigateLocalUp());
   localGoBtn.addEventListener("click", () => loadLocalDirectory(localPathInput.value));
   localPathInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") loadLocalDirectory(localPathInput.value);
+    if (e.key === "Enter") {
+      hideAllDropdowns();
+      loadLocalDirectory(localPathInput.value);
+    }
   });
   localNewFolderBtn.addEventListener("click", () => createLocalFolder());
   localRefreshBtn.addEventListener("click", () => loadLocalDirectory(localPath));
@@ -485,7 +699,10 @@ modalConnect.addEventListener("click", async () => {
   remoteBackBtn.addEventListener("click", () => navigateRemoteUp());
   remoteGoBtn.addEventListener("click", () => loadRemoteDirectory(remotePathInput.value));
   remotePathInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") loadRemoteDirectory(remotePathInput.value);
+    if (e.key === "Enter") {
+      hideAllDropdowns();
+      loadRemoteDirectory(remotePathInput.value);
+    }
   });
   remoteNewFolderBtn.addEventListener("click", () => createRemoteFolder());
   remoteRefreshBtn.addEventListener("click", () => loadRemoteDirectory(remotePath));
@@ -580,6 +797,7 @@ function updateConnectionUI() {
 }
 
 async function disconnectFromServer() {
+  stopIdleTimer();
   try {
     await invoke("disconnect");
   } catch (error) {
@@ -587,6 +805,7 @@ async function disconnectFromServer() {
   }
   isConnected = false;
   connectedHost = "";
+  connectedPort = 22;
   updateConnectionUI();
   updateUploadButton();
 }
@@ -594,6 +813,7 @@ async function disconnectFromServer() {
 // ============ LOCAL FILE SYSTEM ============
 
 async function loadLocalDirectory(path: string) {
+  resetIdleTimer();
   try {
     localFileList.innerHTML = "<div class='loading'>⏳ Loading...</div>";
     selectedLocalFiles.clear();
@@ -603,6 +823,7 @@ async function loadLocalDirectory(path: string) {
 
     localPath = path;
     localPathInput.value = path;
+    addRecentLocalDir(path);
 
     files.sort((a, b) => {
       if (a.is_dir && !b.is_dir) return -1;
@@ -658,6 +879,7 @@ async function createLocalFolder() {
 
 async function loadRemoteDirectory(path: string) {
   if (!isConnected) return;
+  resetIdleTimer();
 
   try {
     remoteFileList.innerHTML = "<div class='loading'>⏳ Loading...</div>";
@@ -668,6 +890,7 @@ async function loadRemoteDirectory(path: string) {
 
     remotePath = path;
     remotePathInput.value = path;
+    addRecentRemoteDir(path);
 
     files.sort((a, b) => {
       if (a.is_dir && !b.is_dir) return -1;
@@ -687,6 +910,7 @@ async function loadRemoteDirectory(path: string) {
 }
 
 function navigateRemoteUp() {
+  resetIdleTimer();
   const parts = remotePath.split("/").filter(Boolean);
   parts.pop();
   const parentPath = "/" + parts.join("/");
@@ -694,6 +918,7 @@ function navigateRemoteUp() {
 }
 
 async function createRemoteFolder() {
+  resetIdleTimer();
   if (!isConnected) {
     alert("⚠️ Please connect to a server first");
     return;
@@ -966,6 +1191,7 @@ function updateUploadButton() {
 }
 
 async function uploadSelectedFiles() {
+  resetIdleTimer();
   if (!isConnected) {
     alert("⚠️ Please connect to a server first");
     return;
@@ -984,6 +1210,7 @@ async function uploadSelectedFiles() {
 }
 
 async function queueFilesForUpload(filePaths: string[]) {
+  resetIdleTimer();
   if (!isConnected) {
     alert("⚠️ Please connect to a server first");
     return;
@@ -1626,7 +1853,7 @@ async function renderProfiles() {
     });
     
 
-    // Delete Profile Button
+    // Delete profile button
     const deleteBtn = item.querySelector(".profile-item-delete");
     if (deleteBtn) {
       deleteBtn.addEventListener("click", async (e) => {
@@ -1644,6 +1871,19 @@ async function renderProfiles() {
       });
     }
   });
+
+  // Auto-select last-used profile
+  try {
+    const lastUsed = await invoke<string | null>("get_last_used_profile");
+    if (lastUsed) {
+      const lastUsedItem = profilesList.querySelector(`.profile-item[data-name="${CSS.escape(lastUsed)}"]`) as HTMLElement | null;
+      if (lastUsedItem) {
+        lastUsedItem.click();
+      }
+    }
+  } catch (error) {
+    console.error("Failed to get last used profile:", error);
+  }
 }
 
 

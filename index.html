@@ -24,7 +24,7 @@
           <button id="connect-btn" class="primary">🔗 Connect</button>
           <div class="theme-toggle">
             <button id="theme-blackout" class="theme-toggle-btn active" title="Blackout">Blackout</button>
-            <button id="theme-tokyo" class="theme-toggle-btn" title="Tokyo Night">Tokyo Night</button>
+            <button id="theme-tokyo" class="theme-toggle-btn" title="Moonlight">Moonlight</button>
           </div>
           <div class="zoom-controls">
             <button id="zoom-out"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
@@ -71,8 +71,18 @@
             </div>
           </div>
 
+          <div class="form-group">
+            <label for="idle-timeout">Idle timeout</label>
+            <select id="idle-timeout" class="idle-timeout-select">
+              <option value="0">Disabled</option>
+              <option value="5">5 minutes</option>
+              <option value="15">15 minutes</option>
+              <option value="30" selected>30 minutes</option>
+              <option value="60">60 minutes</option>
+            </select>
+          </div>
 
-            
+
             <div id="connect-status"></div>
           </div>
           
@@ -122,7 +132,10 @@
           <div class="panel-toolbar">
            
             <button id="local-back-btn">← Back</button>
-            <input type="text" id="local-path" class="path-input" value="/" />
+            <div class="path-input-wrapper">
+              <input type="text" id="local-path" class="path-input" value="/" />
+              <div id="local-recent-dropdown" class="recent-dropdown"></div>
+            </div>
             <button id="local-go-btn">Go</button>
              <input type="text" class="search-input" id="local-search" placeholder="Filter..." />
           </div>
@@ -154,7 +167,10 @@
           <div class="panel-toolbar">
            
             <button id="remote-back-btn">← Back</button>
-            <input type="text" id="remote-path" class="path-input" value="/" />
+            <div class="path-input-wrapper">
+              <input type="text" id="remote-path" class="path-input" value="/" />
+              <div id="remote-recent-dropdown" class="recent-dropdown"></div>
+            </div>
             <button id="remote-go-btn">Go</button>
             <input type="text" class="search-input" id="remote-search" placeholder="Filter..." />
           </div>

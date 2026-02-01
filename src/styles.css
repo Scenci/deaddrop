@@ -25,7 +25,7 @@
   --zoom: 1;
 }
 
-/* ============ THEME: Tokyo Night ============ */
+/* ============ THEME: Moonlight ============ */
 [data-theme="tokyo-night"] {
   --bg-primary: #0f1419;
   --bg-secondary: #1c2128;
@@ -410,8 +410,14 @@ button.download-btn svg {
   flex-shrink: 0;
 }
 
-.path-input {
+.path-input-wrapper {
   flex: 1;
+  position: relative;
+  min-width: 0;
+}
+
+.path-input {
+  width: 100%;
   padding: calc(6px * var(--zoom)) calc(10px * var(--zoom));
   font-size: calc(13px * var(--zoom));
   font-family: monospace;
@@ -420,6 +426,48 @@ button.download-btn svg {
   border-radius: 4px;
   color: var(--text-primary);
   outline: none;
+}
+
+.recent-dropdown {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-top: none;
+  border-radius: 0 0 4px 4px;
+  max-height: calc(200px * var(--zoom));
+  overflow-y: auto;
+}
+
+.recent-dropdown.visible {
+  display: block;
+}
+
+.recent-dropdown-header {
+  padding: calc(4px * var(--zoom)) calc(10px * var(--zoom));
+  font-size: calc(11px * var(--zoom));
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-color);
+  user-select: none;
+}
+
+.recent-dropdown-item {
+  padding: calc(6px * var(--zoom)) calc(10px * var(--zoom));
+  font-size: calc(13px * var(--zoom));
+  font-family: monospace;
+  color: var(--text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.recent-dropdown-item:hover {
+  background: var(--bg-hover);
 }
 
 .path-input:focus {
@@ -1167,6 +1215,25 @@ button.download-btn svg {
     opacity: 0;
     transform: translateY(10px);
   }
+}
+
+/* ============ IDLE TIMEOUT SELECT ============ */
+.idle-timeout-select {
+  width: 100%;
+  padding: calc(10px * var(--zoom)) calc(12px * var(--zoom));
+  font-size: inherit;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  outline: none;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.idle-timeout-select:focus {
+  border-color: var(--accent);
 }
 
 /* ============ FORM VALIDATION ============ */
