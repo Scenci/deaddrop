@@ -12,6 +12,10 @@
 
 Deaddrop is a dual-pane file transfer application that allows you to securely transfer files between your local machine and remote servers via SFTP. Built with Rust and TypeScript, it provides a fast, native experience across Windows, macOS, and Linux.
 
+## Important: SSH User Permissions
+
+Deaddrop uses your SSH credentials to interact with remote servers. Your ability to upload, download, create directories, or delete files depends entirely on the permissions of the SSH user account you connect with. If you encounter "permission denied" errors, verify that your SSH user has the appropriate read/write permissions for the directories you are trying to access on the remote server.
+
 ## Features
 
 ### File Transfer
